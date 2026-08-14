@@ -1,3 +1,74 @@
+# patch-vector-search
+
+UNIパッチ埋め込み(998スライド・約1920万パッチ)に対するクラスタベースのベクトル検索
+(FAISS OPQ+IVF+PQ)+WSI逆引き。任意の参照画像(既存コーパス外でもOK)を渡すと、
+類似する組織パッチと、それを多く含むWSIを検索できる。
+
+## クイックスタート
+
+前提: `experiments/0001_20260808_build_patch_manifest` →
+`experiments/0002_20260808_build_faiss_index` が実行済みで、
+`outputs/0002_20260808_build_faiss_index/default/` にインデックスがある状態。
+
+```python
+import numpy as np
+from lib.query_embedding import embed_image_tiles
+from lib.search import PatchIndex
+
+patch_index = PatchIndex.load(
+    index_path="outputs/0002_20260808_build_faiss_index/default/index.faiss",
+    manifest_path="outputs/0002_20260808_build_faiss_index/default/manifest.parquet",
+    slide_meta_path="outputs/0002_20260808_build_faiss_index/default/slide_meta.parquet",
+    features_dir="data/trident_processed/20x_224px_0px_overlap/features_uni_v1",
+)
+
+# 同じ所見の参照画像は複数枚渡せる(1枚でも可)
+query_vecs = np.concatenate([embed_image_tiles(img) for img in ["a.jpg", "b.jpg"]], axis=0)
+
+similar_patches = patch_index.search_similar_patches_multi(query_vecs, k=20)
+top_slides = patch_index.search_top_slides_multi(query_vecs, top_n_slides=20)  # n_hits_ratioで既にソート済み
+```
+
+対話的に試すなら `notebooks/01_query_demo.ipynb`、Slurm経由で実行するなら
+`experiments/0003_20260808_query_demo`(`runx`で投入)。
+
+## 何を使うべきか / 使うべきでないか
+
+複数のアプローチを試し、ground truth(`data/processed_csv/single_finding_liver.csv`、
+確定病理ラベルのある7カテゴリ)で実際に検証した結論:
+
+| 手法 | 推奨? | 理由 |
+|---|---|---|
+| `embed_image_tiles`(タイル分割) | ✅ 推奨(既定) | 病変位置が不明な大きい参照画像で単一クロップより一貫して優れる |
+| `search_similar_patches_multi` / `search_top_slides_multi`(タイルごと個別検索→結果統合) | ✅ 推奨(既定) | 複数参照画像はベクトル平均よりこちらの方が頑健 |
+| WSI逆引きの`n_hits_ratio`ソート | ✅ 推奨(既定) | 単純な`n_hits`ソートより7カテゴリ中5カテゴリで改善、追加コストなし |
+| `embed_image_tiles_auto_scale`(倍率自動補正、`lib/mpp_estimation.py`) | ❌ 非推奨 | 画質は改善するが、GT比較では検索精度がほぼ悪化(7カテゴリ中0カテゴリで最良) |
+| `stain_reference=`(Macenko染色正規化) | ❌ 非推奨 | 同上。ケースによっては大きく悪化する |
+| `embed_image(..., resize_mode="centercrop")`(単一クロップ) | ⚠️ 場合による | 結果の分散が大きく、GTを完全に見失うこともある |
+
+新しい前処理・パラメータのアイデアを試すときは、必ず
+`scripts/validate_against_ground_truth.py`で既存パイプラインとground truth比較してから
+採用すること — 目視で綺麗に見えることは検索精度が上がることを意味しない(このプロジェクトで
+2回実際に踏んだ落とし穴)。
+
+## ディレクトリ構成(このプロジェクト固有)
+
+- `lib/manifest.py` — 998スライドを走査し、manifest/slide_meta/学習サンプルを構築
+- `lib/faiss_index.py` — OPQ+IVF+PQインデックスの学習・構築
+- `lib/query_embedding.py` — 任意画像→UNI埋め込み(タイル分割・倍率補正・染色正規化オプション)
+- `lib/search.py` — `PatchIndex`: 類似パッチ検索・WSI逆引き
+- `lib/mpp_estimation.py` — 倍率(MPP)自動推定。**非推奨**、詳細はモジュールdocstring参照
+- `lib/stain_normalize.py` — Macenko染色正規化。**非推奨**、詳細は`embed_image`のdocstring参照
+- `lib/visualize.py` — サムネイル上へのヒット位置プロット
+- `lib/raw_patch.py` — openslide経由での実解像度パッチクロップ
+- `experiments/0001_..._build_patch_manifest` → `0002_..._build_faiss_index` → `0003_..._query_demo`(この順で依存)
+- `scripts/validate_against_ground_truth.py` — 新しいパイプライン案をGTで検証するツール(要・使用)
+- `scripts/select_average_patch.py` — 染色正規化用の「典型的な」基準パッチを選ぶ(セットアップ用、実行済み)
+
+---
+
+以下は本プロジェクトが使っている実験管理システム(Slurm/PBS)自体の共通ドキュメント。
+
 # Experiment Management System
 
 SlurmおよびPBS (qsub/Miyabi) ベースの実験管理システムです。自動でスケジューラを判別し、実験の作成・投入・通知・再開をコマンド一つで行えます。

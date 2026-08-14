@@ -1,0 +1,16 @@
+# ============================================================
+# Experiment Configuration
+# ============================================================
+# - Fixed hyperparameters go here.
+# - Variable dimensions (model, seed, prompt, ...) go in run_slurm.sh GRID_ARGS.
+# - Do NOT hardcode values you intend to sweep.
+# ============================================================
+
+# --- Hyperparameters ---
+seed: 42
+# train_sample_sizeは0002(OPQ+IVF+PQ学習)の入力になる。OPQ学習コストは
+# おおよそ学習ベクトル数に比例して増えるため、大きくしすぎない
+# (500,000は目安。nlist=4096に対しては十分な比率 — FAISSの目安は
+# クラスタあたり数十〜数百点で、500,000/4096≈122点/クラスタ)。
+features_dir: "data/trident_processed/20x_224px_0px_overlap/features_uni_v1"
+train_sample_size: 500000
