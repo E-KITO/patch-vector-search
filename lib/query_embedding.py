@@ -1,10 +1,24 @@
-"""Embed an arbitrary image into the same UNI (uni_v1) embedding space used to build the patch index.
+"""Embed an arbitrary image into the same UNI embedding space used to build a patch index.
 
-Uses TRIDENT's encoder_factory("uni_v1"), pinned in pyproject.toml to the
-exact commit used to generate data/trident_processed/.../features_uni_v1/*.h5
+Uses TRIDENT's encoder_factory, pinned in pyproject.toml to the exact commit
+used to generate data/trident_processed/.../features_uni_v1/*.h5
 (00-utils/wsi_preprocess uses the same pin) — a different TRIDENT version
 could preprocess images differently and desync the embedding space from the
 already-indexed corpus.
+
+Supports two corpora/encoders — pass the matching `encoder_name` for whichever
+index you're querying, they are NOT interchangeable (different embedding
+spaces, different dimensionality):
+- "uni_v1" (default): data/trident_processed/20x_224px_0px_overlap/features_uni_v1,
+  1024-dim, corpus patches extracted natively at 224px.
+- "uni_v2": data/trident_processed_macenko/.../20x_256px_0px_overlap/features_uni_v2,
+  1536-dim (ViT-giant vs v1's ViT-large), corpus patches extracted natively at
+  256px then resized to 224 for the encoder. This corpus was also produced
+  from a different (Macenko-normalized, exact method not recorded in TRIDENT's
+  own config files) preprocessing of the raw WSIs, so any v1-vs-v2 comparison
+  conflates encoder + patch-size + normalization differences, not normalization
+  alone — see patch-vector-search-project memory for the ground-truth comparison
+  this was run through.
 """
 from __future__ import annotations
 
@@ -14,10 +28,10 @@ import numpy as np
 from PIL import Image
 
 
-_ENCODER_CACHE: dict[str, tuple] = {}
+_ENCODER_CACHE: dict[tuple[str, str], tuple] = {}
 
 
-def _load_encoder(device: str | None):
+def _load_encoder(device: str | None, encoder_name: str = "uni_v1"):
     import torch
     from trident.patch_encoder_models import encoder_factory
 
@@ -28,16 +42,17 @@ def _load_encoder(device: str | None):
     # embed many images in a loop (e.g. lib.mpp_estimation's centroid
     # builder, which embeds hundreds of synthetic crops) would otherwise pay
     # that cost on every single call. Safe to cache: the encoder is a frozen,
-    # stateless eval-mode module for a given device.
-    if device not in _ENCODER_CACHE:
-        encoder = encoder_factory("uni_v1").to(device).eval()
-        # encoder.precision is float16, tuned for GPU inference; float16 has
-        # patchy CPU kernel support in PyTorch, so force float32 on CPU instead.
+    # stateless eval-mode module for a given (device, encoder_name).
+    cache_key = (device, encoder_name)
+    if cache_key not in _ENCODER_CACHE:
+        encoder = encoder_factory(encoder_name).to(device).eval()
+        # encoder.precision is float16/bfloat16, tuned for GPU inference; these
+        # have patchy CPU kernel support in PyTorch, so force float32 on CPU instead.
         dtype = encoder.precision if device.startswith("cuda") else torch.float32
         encoder = encoder.to(dtype)
-        _ENCODER_CACHE[device] = (encoder, dtype)
+        _ENCODER_CACHE[cache_key] = (encoder, dtype)
 
-    encoder, dtype = _ENCODER_CACHE[device]
+    encoder, dtype = _ENCODER_CACHE[cache_key]
     return encoder, device, dtype
 
 
@@ -75,14 +90,19 @@ def _is_blank_tile(crop: Image.Image, mean_threshold: float = 240.0, std_thresho
 def embed_image(
     image: str | Path | Image.Image,
     device: str | None = None,
+    encoder_name: str = "uni_v1",
     stain_reference: str | Path | Image.Image | None = None,
     resize_mode: str = "centercrop",
 ) -> np.ndarray:
-    """Embed a single image with TRIDENT's uni_v1 patch encoder.
+    """Embed a single image with TRIDENT's patch encoder.
 
     Args:
         image: Path to an image file, or an already-loaded PIL Image.
         device: "cuda" or "cpu". Defaults to cuda if available.
+        encoder_name: "uni_v1" (1024-dim, matches the original corpus) or
+            "uni_v2" (1536-dim, matches data/trident_processed_macenko's
+            corpus) — must match whichever PatchIndex you're querying, the
+            two are different embedding spaces. See this module's docstring.
         stain_reference: Optional path/Image to Macenko-normalize `image`
             against before embedding (see lib.stain_normalize). Use this to
             recolor a query crop from a different scanner/lab toward this
@@ -118,7 +138,7 @@ def embed_image(
     """
     import torch
 
-    encoder, device, dtype = _load_encoder(device)
+    encoder, device, dtype = _load_encoder(device, encoder_name)
     image = _load_rgb(image)
 
     if stain_reference is not None:
@@ -159,12 +179,14 @@ def _stretch_transform(image: Image.Image, tile_size: int = 224):
 def embed_image_tiles(
     image: str | Path | Image.Image,
     device: str | None = None,
+    encoder_name: str = "uni_v1",
     tile_size: int = 224,
+    native_tile_size: int | None = None,
     stride: int | None = None,
     stain_reference: str | Path | Image.Image | None = None,
 ) -> np.ndarray:
-    """Split a large reference image into a grid of tile_size x tile_size
-    crops and embed each one, instead of committing to a single crop.
+    """Split a large reference image into a grid of crops and embed each one,
+    instead of committing to a single crop.
 
     Useful when the diagnostic feature in a large image (e.g. a low-detail
     NTP atlas figure) isn't centered or its extent isn't known in advance —
@@ -177,10 +199,27 @@ def embed_image_tiles(
     Args:
         image: Path to an image file, or an already-loaded PIL Image.
         device: "cuda" or "cpu". Defaults to cuda if available.
-        tile_size: Side length of each square tile (224 = the encoder's
-            native input size, so no further resizing happens per-tile).
-        stride: Step between tile origins. Defaults to tile_size (non
-            -overlapping grid); pass e.g. tile_size // 2 for 50% overlap.
+        encoder_name: "uni_v1" (1024-dim) or "uni_v2" (1536-dim) — must match
+            whichever PatchIndex you're querying. See this module's docstring.
+        tile_size: Side length the encoder actually receives (224 = its
+            native input size).
+        native_tile_size: Side length to crop the grid at *before* resizing
+            down/up to tile_size — set this when the corpus you're matching
+            extracted patches at a native size other than its encoder's input
+            size (e.g. data/trident_processed_macenko's uni_v2 corpus crops
+            256px native patches, then resizes to 224 for the encoder — see
+            lib.raw_patch.crop_patch, which does the same for real corpus
+            patches). Defaults to tile_size (crop and encoder input are the
+            same, no resize) when None. Leaving this at the encoder's input
+            size when the true corpus field-of-view is larger is the same
+            kind of magnification mismatch this project spent a lot of effort
+            fixing for the auto-scale feature (lib.mpp_estimation) — except
+            here the fix is just "crop at the right native size", since the
+            corpus's native size is already known instead of needing to be
+            estimated.
+        stride: Step between tile origins, in native_tile_size units.
+            Defaults to native_tile_size (non-overlapping grid); pass e.g.
+            native_tile_size // 2 for 50% overlap.
         stain_reference: Optional path/Image to Macenko-normalize `image`
             against before tiling (see embed_image's docstring for the same
             caveat: helps domain-shifted queries but can hurt already
@@ -194,7 +233,7 @@ def embed_image_tiles(
     """
     import torch
 
-    encoder, device, dtype = _load_encoder(device)
+    encoder, device, dtype = _load_encoder(device, encoder_name)
     image = _load_rgb(image)
 
     if stain_reference is not None:
@@ -202,17 +241,19 @@ def embed_image_tiles(
 
         image = MacenkoNormalizer().fit(stain_reference).transform(image)
 
+    crop_size = native_tile_size or tile_size
+
     # Upscale first if the image is smaller than one tile on either side, so
     # there's always at least a 1x1 grid.
     w, h = image.size
-    scale = max(tile_size / w, tile_size / h, 1.0)
+    scale = max(crop_size / w, crop_size / h, 1.0)
     if scale > 1.0:
-        image = image.resize((max(tile_size, round(w * scale)), max(tile_size, round(h * scale))), Image.LANCZOS)
+        image = image.resize((max(crop_size, round(w * scale)), max(crop_size, round(h * scale))), Image.LANCZOS)
         w, h = image.size
 
-    stride = stride or tile_size
-    xs = sorted(set(list(range(0, w - tile_size + 1, stride)) + [w - tile_size]))
-    ys = sorted(set(list(range(0, h - tile_size + 1, stride)) + [h - tile_size]))
+    stride = stride or crop_size
+    xs = sorted(set(list(range(0, w - crop_size + 1, stride)) + [w - crop_size]))
+    ys = sorted(set(list(range(0, h - crop_size + 1, stride)) + [h - crop_size]))
 
     from torchvision import transforms
 
@@ -220,10 +261,12 @@ def embed_image_tiles(
         transforms.ToTensor(),
         transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
     ])
-    crops = [image.crop((x, y, x + tile_size, y + tile_size)) for y in ys for x in xs]
+    crops = [image.crop((x, y, x + crop_size, y + crop_size)) for y in ys for x in xs]
     non_blank = [c for c in crops if not _is_blank_tile(c)]
     if non_blank:  # only filter if it wouldn't empty the tile set entirely
         crops = non_blank
+    if crop_size != tile_size:
+        crops = [c.resize((tile_size, tile_size), Image.LANCZOS) for c in crops]
 
     tiles = [to_tensor(c) for c in crops]
     batch = torch.stack(tiles).to(device=device, dtype=dtype)

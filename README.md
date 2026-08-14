@@ -45,6 +45,7 @@ top_slides = patch_index.search_top_slides_multi(query_vecs, top_n_slides=20)  #
 | `embed_image_tiles_auto_scale`(倍率自動補正、`lib/mpp_estimation.py`) | ❌ 非推奨 | 画質は改善するが、GT比較では検索精度がほぼ悪化(7カテゴリ中0カテゴリで最良) |
 | `stain_reference=`(Macenko染色正規化) | ❌ 非推奨 | 同上。ケースによっては大きく悪化する |
 | `embed_image(..., resize_mode="centercrop")`(単一クロップ) | ⚠️ 場合による | 結果の分散が大きく、GTを完全に見失うこともある |
+| `encoder_name="uni_v2"`コーパス(1536次元・256px、`experiments/0004`/`0005`/`0006`) | ⚠️ v1よりやや劣るが僅差(公平な比較後) | クエリ側は`lib.torchstain_normalize.normalize_to_reference`で`data/baseline/63958_x38976_y7616.png`に正規化してから使うこと(`lib.stain_normalize`の自作Macenkoでは不十分——自己一致性0.5〜0.84止まり、torchstainなら0.96〜0.996)。正規化後の公平なGT比較でも7カテゴリ中6カテゴリでv1が優位だが、差は大幅縮小(例: Hypertrophy 94→27)。PQ量子化を細かくする(pq_m 64→96)ことも試したが改善なし。詳細は下記「uni_v2コーパスの調査状況」参照。既定は引き続き`uni_v1`(`experiments/0001`/`0002`) |
 
 新しい前処理・パラメータのアイデアを試すときは、必ず
 `scripts/validate_against_ground_truth.py`で既存パイプラインとground truth比較してから
@@ -58,12 +59,52 @@ top_slides = patch_index.search_top_slides_multi(query_vecs, top_n_slides=20)  #
 - `lib/query_embedding.py` — 任意画像→UNI埋め込み(タイル分割・倍率補正・染色正規化オプション)
 - `lib/search.py` — `PatchIndex`: 類似パッチ検索・WSI逆引き
 - `lib/mpp_estimation.py` — 倍率(MPP)自動推定。**非推奨**、詳細はモジュールdocstring参照
-- `lib/stain_normalize.py` — Macenko染色正規化。**非推奨**、詳細は`embed_image`のdocstring参照
+- `lib/stain_normalize.py` — 自作Macenko染色正規化。**非推奨**、詳細は`embed_image`のdocstring参照
+- `lib/torchstain_normalize.py` — `torchstain`ライブラリ経由のMacenko正規化。uni_v2コーパス
+  (`data/trident_processed_macenko`)のクエリ側正規化に必須(自作`stain_normalize.py`では
+  再現不十分)、詳細はモジュールdocstring参照
 - `lib/visualize.py` — サムネイル上へのヒット位置プロット
 - `lib/raw_patch.py` — openslide経由での実解像度パッチクロップ
-- `experiments/0001_..._build_patch_manifest` → `0002_..._build_faiss_index` → `0003_..._query_demo`(この順で依存)
+- `experiments/0001_..._build_patch_manifest` → `0002_..._build_faiss_index` → `0003_..._query_demo`
+  (この順で依存。**現行の推奨インデックス**、`uni_v1`・1024次元)
+- `experiments/0004_..._build_patch_manifest_v2` → `0005_..._build_faiss_index_v2`
+  (`uni_v2`・1536次元・pq_m=64版)→ `0006_..._build_faiss_index_v2_pqm96`
+  (同じ元データ、pq_m=96版。詳細は下記「uni_v2コーパスの調査状況」参照)
 - `scripts/validate_against_ground_truth.py` — 新しいパイプライン案をGTで検証するツール(要・使用)
 - `scripts/select_average_patch.py` — 染色正規化用の「典型的な」基準パッチを選ぶ(セットアップ用、実行済み)
+
+## uni_v2コーパスの調査状況(2026-08-14、一旦区切り)
+
+`data/trident_processed_macenko`(TRIDENTのuni_v2エンコーダ・256pxネイティブパッチ・
+torchstainでMacenko正規化済みの生WSIから抽出)という別コーパスを試験的に評価した。
+**結論: `uni_v1`(既定)を置き換えるには至らなかった。** 経緯:
+
+1. 最初にground truth比較したところ7カテゴリ中6カテゴリでv1に劣ったが、原因は
+   モデル性能ではなく、クエリ側の染色正規化がコーパス側(`torchstain`ライブラリ使用)と
+   一致していなかったこと(自作`lib/stain_normalize.py`では自己一致性0.5〜0.84止まり)。
+   `lib/torchstain_normalize.py`で修正し、公平な比較にしたところ差は大幅縮小
+   (例: Hypertrophy best_rank 94→27)。
+2. それでもv1が引き続き優位だったため、`experiments/0005`(pq_m=64、1サブベクトル
+   あたり24次元)のPQ量子化が粗すぎる可能性を疑い、exact(生ベクトル)計算と近似検索の
+   順位を比較する診断を実施。**Hypertrophyカテゴリで、近似検索が300〜400位台に
+   埋もれさせていたスライドが、exact計算では上位10〜20位相当の強いシグナルを
+   持っていることを確認**(例: スライド28741は近似313位だがexact上位11位相当)。
+3. これを受けて`experiments/0006`(pq_m=96、v1と同じ1サブベクトルあたり16次元)で
+   インデックスを再構築し、GT比較をやり直した。**しかし改善は誤差レベルに留まった**
+   (Hypertrophy best_rankは27のまま、Glycogenはむしろ107→127に悪化)。
+   nprobeを64→256に上げる追加検証でも27→25とごくわずかな改善のみだったことも
+   踏まえ、**「埋もれた強いシグナルが近似検索で見つからない」問題の主因はPQの
+   量子化精度ではなく、IVFの粗いクラスタリング(nlist=4096、nprobeが探索する
+   クラスタ数)側にある可能性が高い**、という所見で一旦区切っている
+   (深追いすればnlist自体を大きくする、GT関連スライドが同じクラスタに
+   収まっているか確認する、といった方向性はあるが未着手)。
+
+**現状のデフォルト**: `scripts/validate_against_ground_truth.py::load_v2_index()`は
+`experiments/0005`(pq_m=64、改善は無いがシンプルでインデックスも小さい)を指す。
+`experiments/0006`(pq_m=96)は参考用に残置(`exp_dir=`引数で指定すれば使える)。
+再びこの調査を引き継ぐ場合は、上記3までで判明している「IVFクラスタリング側の
+問題」という仮説の検証(nlist引き上げ、またはGT該当スライドが実際にどのクラスタに
+属しているかの直接確認)から始めるのが自然な続き。
 
 ---
 

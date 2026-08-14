@@ -39,8 +39,10 @@ export EXP_NAME="0002_20260808_build_faiss_index"
 # （例: 出力を実行中にリアルタイムで/workspace側から監視したい等）。
 # =====================================================
 
-USE_LOCAL_SSD_INPUT=1
-USE_LOCAL_SSD_OUTPUT=1
+USE_LOCAL_SSD_INPUT=0  # data/ is now ~1TB (raw_wsi+both trident_processed corpora); doesn't fit /scratch.
+                       # Unused anyway — this project's code always reads via PROJECT_ROOT-relative
+                       # paths (config.yml's features_dir etc.), never via $DATASET_DIR.
+USE_LOCAL_SSD_OUTPUT=0  # /scratch on this cluster was found 100% full (other jobs' leftovers); write directly to workspace instead.
 
 # =====================================================
 # python path

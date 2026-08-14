@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=0001_20260808_build_patch_manifest
+#SBATCH --job-name=0004_20260814_build_patch_manifest_v2
 #SBATCH --partition=medium-andre01
-#SBATCH --output=/workspace/andre01/honzawa/02-playground/patch-vector-search/logs/0001_20260808_build_patch_manifest/%j_0001_20260808_build_patch_manifest.out
-#SBATCH --error=/workspace/andre01/honzawa/02-playground/patch-vector-search/logs/0001_20260808_build_patch_manifest/%j_0001_20260808_build_patch_manifest.out
+#SBATCH --output=/workspace/andre01/honzawa/02-playground/patch-vector-search/logs/0004_20260814_build_patch_manifest_v2/%j_0004_20260814_build_patch_manifest_v2.out
+#SBATCH --error=/workspace/andre01/honzawa/02-playground/patch-vector-search/logs/0004_20260814_build_patch_manifest_v2/%j_0004_20260814_build_patch_manifest_v2.out
 #SBATCH --signal=B:USR1@72
 #SBATCH --export=ALL
 #SBATCH --nodes=1
@@ -19,8 +19,8 @@
 
 # Array run にする場合、上の3行の --output/--error/この直後の --array を
 # 以下の2行に置き換える（%j→%A_%a、--array=0-N を追加。Nの決め方は下記参照）:
-# #SBATCH --output=/workspace/andre01/honzawa/02-playground/patch-vector-search/logs/0001_20260808_build_patch_manifest/%A_%a_0001_20260808_build_patch_manifest.out
-# #SBATCH --error=/workspace/andre01/honzawa/02-playground/patch-vector-search/logs/0001_20260808_build_patch_manifest/%A_%a_0001_20260808_build_patch_manifest.out
+# #SBATCH --output=/workspace/andre01/honzawa/02-playground/patch-vector-search/logs/0004_20260814_build_patch_manifest_v2/%A_%a_0004_20260814_build_patch_manifest_v2.out
+# #SBATCH --error=/workspace/andre01/honzawa/02-playground/patch-vector-search/logs/0004_20260814_build_patch_manifest_v2/%A_%a_0004_20260814_build_patch_manifest_v2.out
 # #SBATCH --array=0-N
 #
 # ⚠️ 注意: リソース(--gres/--cpus-per-task/--mem/--time)を変更したら、
@@ -30,7 +30,7 @@
 #          下記の Array run / Seq run の使用を推奨。
 
 export PROJECT_ROOT="/workspace/andre01/honzawa/02-playground/patch-vector-search"
-export EXP_NAME="0001_20260808_build_patch_manifest"
+export EXP_NAME="0004_20260814_build_patch_manifest_v2"
 
 # =====================================================
 # Storage

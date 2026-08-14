@@ -57,6 +57,7 @@ dependencies = [
     "pillow",
     "faiss-cpu",
     "trident",
+    "torchstain>=1.4.1",
 ]
 
 

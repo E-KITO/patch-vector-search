@@ -1,16 +1,17 @@
 #!/bin/bash
-#SBATCH --job-name=0001_20260808_build_patch_manifest
-#SBATCH --partition=medium-andre01
-#SBATCH --output=/workspace/andre01/honzawa/02-playground/patch-vector-search/logs/0001_20260808_build_patch_manifest/%j_0001_20260808_build_patch_manifest.out
-#SBATCH --error=/workspace/andre01/honzawa/02-playground/patch-vector-search/logs/0001_20260808_build_patch_manifest/%j_0001_20260808_build_patch_manifest.out
-#SBATCH --signal=B:USR1@72
+#SBATCH --job-name=0006_20260814_build_faiss_index_v2_pqm96
+#SBATCH --partition=large-andre01
+#SBATCH --output=/workspace/andre01/honzawa/02-playground/patch-vector-search/logs/0006_20260814_build_faiss_index_v2_pqm96/%j_0006_20260814_build_faiss_index_v2_pqm96.out
+#SBATCH --error=/workspace/andre01/honzawa/02-playground/patch-vector-search/logs/0006_20260814_build_faiss_index_v2_pqm96/%j_0006_20260814_build_faiss_index_v2_pqm96.out
+#SBATCH --signal=B:USR1@144
 #SBATCH --export=ALL
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=32g
-#SBATCH --time=2:00:00
-# CPU-only: coords走査+998ファイル中~100枚だけfeaturesフル読み込み(学習サンプル収集)する
-# 軽量パス。GPU不要なので--gres=gpu:1は外している。実測時間を見てから0002のリソースを決める。
+#SBATCH --cpus-per-task=20
+#SBATCH --mem=96g
+#SBATCH --time=4:00:00
+# CPU-only: FAISSのKMeans/OPQ/PQ学習+全999ファイル(~83GB、1536次元)を読んで
+# add_with_idsする重量級パス(I/O支配)。v1(1024次元・64g)よりベクトルが大きい分
+# 余裕を見て96gに設定。GPU不要。
 
 # 他の実験のジョブに依存させたい場合、有効化してjob_idを埋める
 # （job_idは outputs/{依存先exp}/latest_job_id.txt を参照。投入のたびに
@@ -19,8 +20,8 @@
 
 # Array run にする場合、上の3行の --output/--error/この直後の --array を
 # 以下の2行に置き換える（%j→%A_%a、--array=0-N を追加。Nの決め方は下記参照）:
-# #SBATCH --output=/workspace/andre01/honzawa/02-playground/patch-vector-search/logs/0001_20260808_build_patch_manifest/%A_%a_0001_20260808_build_patch_manifest.out
-# #SBATCH --error=/workspace/andre01/honzawa/02-playground/patch-vector-search/logs/0001_20260808_build_patch_manifest/%A_%a_0001_20260808_build_patch_manifest.out
+# #SBATCH --output=/workspace/andre01/honzawa/02-playground/patch-vector-search/logs/0006_20260814_build_faiss_index_v2_pqm96/%A_%a_0006_20260814_build_faiss_index_v2_pqm96.out
+# #SBATCH --error=/workspace/andre01/honzawa/02-playground/patch-vector-search/logs/0006_20260814_build_faiss_index_v2_pqm96/%A_%a_0006_20260814_build_faiss_index_v2_pqm96.out
 # #SBATCH --array=0-N
 #
 # ⚠️ 注意: リソース(--gres/--cpus-per-task/--mem/--time)を変更したら、
@@ -30,7 +31,7 @@
 #          下記の Array run / Seq run の使用を推奨。
 
 export PROJECT_ROOT="/workspace/andre01/honzawa/02-playground/patch-vector-search"
-export EXP_NAME="0001_20260808_build_patch_manifest"
+export EXP_NAME="0006_20260814_build_faiss_index_v2_pqm96"
 
 # =====================================================
 # Storage
