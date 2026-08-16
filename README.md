@@ -1,10 +1,107 @@
 # patch-vector-search
 
-UNIパッチ埋め込み(998スライド・約1920万パッチ)に対するクラスタベースのベクトル検索
+UNIパッチ埋め込みに対するクラスタベースのベクトル検索
 (FAISS OPQ+IVF+PQ)+WSI逆引き。任意の参照画像(既存コーパス外でもOK)を渡すと、
-類似する組織パッチと、それを多く含むWSIを検索できる。
+類似する組織パッチと、それを多く含むWSIを検索できる。  
+**最終的な目標は、INHANDやNTPの非腫瘍性病変アトラスのような、所見の代表的なパッチを検索クエリとして使い、TGGATEの大規模なWSIコーパスから同じ所見を引き出してデータベース化すること。**
 
-## クイックスタート
+## 現状(2026-08-14時点)
+
+- **動くもの**: 任意の画像(1枚〜複数枚)を渡すと、類似パッチ検索とWSI逆引きができる。
+- **定量評価**: NTP非腫瘍性病変アトラス由来のクエリ画像(下記「評価に使ったデータと
+  その限界」参照)で7カテゴリのground truth比較を実施済み。7カテゴリとも正解スライドを
+  候補プール内に発見できているが(found=n_gt)、best_rank(最上位正解スライドの順位)は
+  9〜332位とカテゴリによって大きな差がある。
+- **未解決の課題は「今後やること」参照**。特にIVFクラスタ被覆率の仮説と、
+  評価クエリを手動ROIクロップに変えた場合の効果は、どちらも手を付けていない。
+
+## 評価に使ったデータとその限界
+
+Ground truth比較(`scripts/validate_against_ground_truth.py`)のクエリ画像は、
+`data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver/`に置いた
+**NTP(National Toxicology Program)の非腫瘍性病変アトラス(NNL)**から取得した、
+各所見カテゴリの代表的な掲載図版(26カテゴリ・94枚、1所見あたり1〜8枚)。
+
+以下の限界を踏まえて結果を解釈すること:
+
+- **アトラス画像1枚は所見部位を含む図版全体であり、所見が写っているのは画像の一部分に
+  過ぎない**(矢印注釈・番号ラベル・周囲の正常組織や余白を含む、1800x1200px程度の
+  パノラマ〜クローズアップが倍率不揃いのまま混在している)。
+- **所見部位だけを人手で切り出す作業はしていない**。`embed_image_tiles`が画像全体を
+  機械的にタイル分割し、白背景タイルの除外以外は所見領域かどうかの判別なしに全タイルを
+  検索へ投入している。つまりこの評価は「自動化できる範囲でどこまでやれるか」を測った
+  ものであり、人手でROIを切り出した場合の性能上限を示すものではない。best_rankが悪い
+  カテゴリ(例: Kupffer細胞増殖 best_rank=124、封入体 best_rank=14〜297)は、モデルや
+  検索アルゴリズムの限界だけでなく、クエリ画像に占める「所見と無関係なタイル」の割合が
+  高いことも一因である可能性が高い。
+- Ground truthとしている所見自体(`data/processed_csv/single_finding_liver.csv`)は998スライド
+  コーパスの一部にしか対応しない。NNLの26カテゴリのうち、998スライドコーパス内に
+  確定ラベル付きスライドが1件でもあるのは7カテゴリのみ(Hypertrophy/Necrosis/
+  Increased mitosis/Glycogen/Hematopoiesis/Kupffer細胞増殖/封入体)。残り19カテゴリ
+  (Fatty Change, Focus, Inflammationなど)は検証不能。
+  Degeneration, fattyとFatty Changeなど、対応付けを行うべき所見もあるが現状は未対応。
+  その為、Ground truth比較は基本あてにしなくていい。あくまで「7カテゴリのうち、正解スライドを候補プール内に発見できるか」という観点での評価に留める。
+
+## 今後やること
+
+- [ ]  **uni v2など他モデルでの埋め込みを検討する**
+- [ ]  **IVFクラスタリングの粗さが近似検索の精度を下げている可能性の検証**
+- [ ]  **クエリ画像を人手でROIクロップした場合の性能上限を測る**
+- [ ]  **検索結果の可視化を改善する**(現状はサムネイルJPEG上にヒット位置をプロットするだけで、実解像度WSIピクセルは無い。WSIのヒートマップ表示や、ヒットパッチのサムネイル表示など)
+- [ ]  **抽出できる所見・できない所見を精査する**\
+など、いろいろやる。
+
+## 大まかな構成
+
+```
+[① manifest構築]                [② FAISSインデックス構築]
+lib/manifest.py           →    lib/faiss_index.py
+998個のh5を走査し                OPQ+IVF+PQ(コサイン類似度=
+manifest/slide_meta/             正規化ベクトルのinner product)
+学習サンプルを作成                を学習・構築。圧縮後 数GB程度
+(experiments/0001)               (experiments/0002)
+                                        │
+                                        ▼
+[③ クエリ画像埋め込み]            [④ 検索]
+lib/query_embedding.py    →    lib/search.py::PatchIndex
+任意画像→タイル分割→              近似候補をFAISSで取得し、
+TRIDENTのUNIエンコーダで          パッチ検索はexact re-rank、
+埋め込み(コーパス構築時と          WSI逆引きはn_hits_ratioで
+同じ前処理・同じTRIDENT revに固定)  スライド集計
+                                        │
+                                        ▼
+                                [⑤ 可視化]
+                                lib/visualize.py
+                                サムネイルJPEG上にヒット位置を
+                                プロット(生WSIピクセルが無い
+                                前提の代替可視化)
+```
+
+`experiments/0001`→`0002`が一度だけ実行するインデックス構築、`experiments/0003`
+(または`notebooks/01_query_demo.ipynb`)が③〜⑤を毎回実行するクエリ側。
+`scripts/validate_against_ground_truth.py`はground truthとの比較専用で本番の検索
+パスとは独立しており、新しい前処理案の採否判断に使う。
+
+## 使っているツール
+
+pyproject.tomlはscaffold元のtemplateに由来する依存が大量に残っているが、このプロジェクトが
+実際に使っているのは以下のみ:
+
+| ツール | 用途 |
+|---|---|
+| `trident`(git依存、TRIDENTの特定commitにpin) | UNIエンコーダ(`encoder_factory`)呼び出し。コーパス側と同じ前処理を再現するため異なるrevへは上げない |
+| `faiss-cpu` | OPQ+IVF+PQインデックスの学習・構築・検索(クラスタベース近似最近傍探索の実体) |
+| `h5py` | コーパスのパッチ特徴量(`features_uni_v1`/`features_uni_v2`の`.h5`)読み込み |
+| `torchstain` | `uni_v2`コーパスのクエリ側染色正規化(Macenko)。自作`lib/stain_normalize.py`では再現不十分と判明したため必須 |
+| `torch` / `torchvision` | UNIエンコーダの推論バックエンド(TRIDENT経由) |
+| `pillow` | 画像読み込み・タイル分割・リサイズ |
+| `pandas` / `pyarrow` | manifest/slide_metaの`.parquet`読み書き |
+| `numpy` | ベクトル演算全般 |
+
+それ以外(jupyterlab, optuna, lightgbm, elasticsearch, spacy, vllm, wandb 等)は
+scaffold元テンプレートの汎用依存で、このプロジェクトのコードからは一切参照していない。
+
+## 使い方
 
 前提: `experiments/0001_20260808_build_patch_manifest` →
 `experiments/0002_20260808_build_faiss_index` が実行済みで、
