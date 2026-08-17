@@ -1,0 +1,23 @@
+# ============================================================
+# Experiment Configuration
+# ============================================================
+# - Fixed hyperparameters go here.
+# - Variable dimensions (model, seed, prompt, ...) go in run_slurm.sh GRID_ARGS.
+# - Do NOT hardcode values you intend to sweep.
+# ============================================================
+
+# --- Hyperparameters ---
+seed: 42
+# train_sample_sizeは0005(OPQ+IVF+PQ学習)の入力になる。OPQ学習コストは
+# おおよそ学習ベクトル数に比例して増えるため、大きくしすぎない
+# (500,000は目安。nlist=4096に対しては十分な比率 — FAISSの目安は
+# クラスタあたり数十〜数百点で、500,000/4096≈122点/クラスタ)。
+#
+# v2コーパス: data/trident_processed.tar.gz を解凍した
+# data/trident_processed_macenko/ 以下。0001(v1)との違い:
+# - エンコーダ: uni_v1(1024次元) → uni_v2(1536次元)
+# - パッチ抽出サイズ: 224px → 256px(ネイティブ、エンコーダ入力は224にリサイズ)
+# - 元WSIの前処理: 詳細不明だがMacenko染色正規化が適用された版と説明を受けている
+#   (TRIDENT自体の設定ファイルには正規化の記載なし — WSI側で事前処理された可能性)
+features_dir: "data/trident_processed_macenko/results/trident/20x_256px_0px_overlap/features_uni_v2"
+train_sample_size: 500000

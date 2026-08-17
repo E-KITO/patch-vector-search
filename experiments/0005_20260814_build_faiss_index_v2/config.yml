@@ -1,0 +1,21 @@
+# ============================================================
+# Experiment Configuration
+# ============================================================
+# - Fixed hyperparameters go here.
+# - Variable dimensions (model, seed, prompt, ...) go in run_slurm.sh GRID_ARGS.
+# - Do NOT hardcode values you intend to sweep.
+# ============================================================
+
+# --- Hyperparameters ---
+seed: 42
+features_dir: "data/trident_processed_macenko/results/trident/20x_256px_0px_overlap/features_uni_v2"
+# 0004_..._build_patch_manifest_v2 の出力(project_root相対)
+manifest_exp_dir: "outputs/0004_20260814_build_patch_manifest_v2/default"
+# uni_v2は1536次元(uni_v1は1024)。pq_m=64はどちらも割り切れる(1536/64=24)。
+dim: 1536
+nlist: 4096
+pq_m: 64
+pq_nbits: 8
+# faissのOPQMatrixデフォルト(niter=25)は学習ベクトル数に対しほぼ比例して遅くなる
+# (ローカル検証: n=2000,niter=2で約19秒/シングルスレッド)。10に下げて許容範囲に収める。
+opq_niter: 10

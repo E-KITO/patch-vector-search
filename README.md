@@ -1,3 +1,212 @@
+# patch-vector-search
+
+UNIパッチ埋め込みに対するクラスタベースのベクトル検索
+(FAISS OPQ+IVF+PQ)+WSI逆引き。任意の参照画像(既存コーパス外でもOK)を渡すと、
+類似する組織パッチと、それを多く含むWSIを検索できる。  
+**最終的な目標は、INHANDやNTPの非腫瘍性病変アトラスのような、所見の代表的なパッチを検索クエリとして使い、TGGATEの大規模なWSIコーパスから同じ所見を引き出してデータベース化すること。**
+
+## 現状(2026-08-14時点)
+
+- **動くもの**: 任意の画像(1枚〜複数枚)を渡すと、類似パッチ検索とWSI逆引きができる。
+- **定量評価**: NTP非腫瘍性病変アトラス由来のクエリ画像(下記「評価に使ったデータと
+  その限界」参照)で7カテゴリのground truth比較を実施済み。7カテゴリとも正解スライドを
+  候補プール内に発見できているが(found=n_gt)、best_rank(最上位正解スライドの順位)は
+  9〜332位とカテゴリによって大きな差がある。
+- **未解決の課題は「今後やること」参照**。特にIVFクラスタ被覆率の仮説と、
+  評価クエリを手動ROIクロップに変えた場合の効果は、どちらも手を付けていない。
+
+## 評価に使ったデータとその限界
+
+Ground truth比較(`scripts/validate_against_ground_truth.py`)のクエリ画像は、
+`data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver/`に置いた
+**NTP(National Toxicology Program)の非腫瘍性病変アトラス(NNL)**から取得した、
+各所見カテゴリの代表的な掲載図版(26カテゴリ・94枚、1所見あたり1〜8枚)。
+
+以下の限界を踏まえて結果を解釈すること:
+
+- **アトラス画像1枚は所見部位を含む図版全体であり、所見が写っているのは画像の一部分に
+  過ぎない**(矢印注釈・番号ラベル・周囲の正常組織や余白を含む、1800x1200px程度の
+  パノラマ〜クローズアップが倍率不揃いのまま混在している)。
+- **所見部位だけを人手で切り出す作業はしていない**。`embed_image_tiles`が画像全体を
+  機械的にタイル分割し、白背景タイルの除外以外は所見領域かどうかの判別なしに全タイルを
+  検索へ投入している。つまりこの評価は「自動化できる範囲でどこまでやれるか」を測った
+  ものであり、人手でROIを切り出した場合の性能上限を示すものではない。best_rankが悪い
+  カテゴリ(例: Kupffer細胞増殖 best_rank=124、封入体 best_rank=14〜297)は、モデルや
+  検索アルゴリズムの限界だけでなく、クエリ画像に占める「所見と無関係なタイル」の割合が
+  高いことも一因である可能性が高い。
+- Ground truthとしている所見自体(`data/processed_csv/single_finding_liver.csv`)は998スライド
+  コーパスの一部にしか対応しない。NNLの26カテゴリのうち、998スライドコーパス内に
+  確定ラベル付きスライドが1件でもあるのは7カテゴリのみ(Hypertrophy/Necrosis/
+  Increased mitosis/Glycogen/Hematopoiesis/Kupffer細胞増殖/封入体)。残り19カテゴリ
+  (Fatty Change, Focus, Inflammationなど)は検証不能。
+  Degeneration, fattyとFatty Changeなど、対応付けを行うべき所見もあるが現状は未対応。
+  その為、Ground truth比較は基本あてにしなくていい。あくまで「7カテゴリのうち、正解スライドを候補プール内に発見できるか」という観点での評価に留める。
+
+## 今後やること
+
+- [ ]  **uni v2など他モデルでの埋め込みを検討する**
+- [ ]  **IVFクラスタリングの粗さが近似検索の精度を下げている可能性の検証**
+- [ ]  **クエリ画像を人手でROIクロップした場合の性能上限を測る**
+- [ ]  **検索結果の可視化を改善する**(現状はサムネイルJPEG上にヒット位置をプロットするだけで、実解像度WSIピクセルは無い。WSIのヒートマップ表示や、ヒットパッチのサムネイル表示など)
+- [ ]  **抽出できる所見・できない所見を精査する**\
+など、いろいろやる。
+
+## 大まかな構成
+
+```
+[① manifest構築]                [② FAISSインデックス構築]
+lib/manifest.py           →    lib/faiss_index.py
+998個のh5を走査し                OPQ+IVF+PQ(コサイン類似度=
+manifest/slide_meta/             正規化ベクトルのinner product)
+学習サンプルを作成                を学習・構築。圧縮後 数GB程度
+(experiments/0001)               (experiments/0002)
+                                        │
+                                        ▼
+[③ クエリ画像埋め込み]            [④ 検索]
+lib/query_embedding.py    →    lib/search.py::PatchIndex
+任意画像→タイル分割→              近似候補をFAISSで取得し、
+TRIDENTのUNIエンコーダで          パッチ検索はexact re-rank、
+埋め込み(コーパス構築時と          WSI逆引きはn_hits_ratioで
+同じ前処理・同じTRIDENT revに固定)  スライド集計
+                                        │
+                                        ▼
+                                [⑤ 可視化]
+                                lib/visualize.py
+                                サムネイルJPEG上にヒット位置を
+                                プロット(生WSIピクセルが無い
+                                前提の代替可視化)
+```
+
+`experiments/0001`→`0002`が一度だけ実行するインデックス構築、`experiments/0003`
+(または`notebooks/01_query_demo.ipynb`)が③〜⑤を毎回実行するクエリ側。
+`scripts/validate_against_ground_truth.py`はground truthとの比較専用で本番の検索
+パスとは独立しており、新しい前処理案の採否判断に使う。
+
+## 使っているツール
+
+pyproject.tomlはscaffold元のtemplateに由来する依存が大量に残っているが、このプロジェクトが
+実際に使っているのは以下のみ:
+
+| ツール | 用途 |
+|---|---|
+| `trident`(git依存、TRIDENTの特定commitにpin) | UNIエンコーダ(`encoder_factory`)呼び出し。コーパス側と同じ前処理を再現するため異なるrevへは上げない |
+| `faiss-cpu` | OPQ+IVF+PQインデックスの学習・構築・検索(クラスタベース近似最近傍探索の実体) |
+| `h5py` | コーパスのパッチ特徴量(`features_uni_v1`/`features_uni_v2`の`.h5`)読み込み |
+| `torchstain` | `uni_v2`コーパスのクエリ側染色正規化(Macenko)。自作`lib/stain_normalize.py`では再現不十分と判明したため必須 |
+| `torch` / `torchvision` | UNIエンコーダの推論バックエンド(TRIDENT経由) |
+| `pillow` | 画像読み込み・タイル分割・リサイズ |
+| `pandas` / `pyarrow` | manifest/slide_metaの`.parquet`読み書き |
+| `numpy` | ベクトル演算全般 |
+
+それ以外(jupyterlab, optuna, lightgbm, elasticsearch, spacy, vllm, wandb 等)は
+scaffold元テンプレートの汎用依存で、このプロジェクトのコードからは一切参照していない。
+
+## 使い方
+
+前提: `experiments/0001_20260808_build_patch_manifest` →
+`experiments/0002_20260808_build_faiss_index` が実行済みで、
+`outputs/0002_20260808_build_faiss_index/default/` にインデックスがある状態。
+
+```python
+import numpy as np
+from lib.query_embedding import embed_image_tiles
+from lib.search import PatchIndex
+
+patch_index = PatchIndex.load(
+    index_path="outputs/0002_20260808_build_faiss_index/default/index.faiss",
+    manifest_path="outputs/0002_20260808_build_faiss_index/default/manifest.parquet",
+    slide_meta_path="outputs/0002_20260808_build_faiss_index/default/slide_meta.parquet",
+    features_dir="data/trident_processed/20x_224px_0px_overlap/features_uni_v1",
+)
+
+# 同じ所見の参照画像は複数枚渡せる(1枚でも可)
+query_vecs = np.concatenate([embed_image_tiles(img) for img in ["a.jpg", "b.jpg"]], axis=0)
+
+similar_patches = patch_index.search_similar_patches_multi(query_vecs, k=20)
+top_slides = patch_index.search_top_slides_multi(query_vecs, top_n_slides=20)  # n_hits_ratioで既にソート済み
+```
+
+対話的に試すなら `notebooks/01_query_demo.ipynb`、Slurm経由で実行するなら
+`experiments/0003_20260808_query_demo`(`runx`で投入)。
+
+## 何を使うべきか / 使うべきでないか
+
+複数のアプローチを試し、ground truth(`data/processed_csv/single_finding_liver.csv`、
+確定病理ラベルのある7カテゴリ)で実際に検証した結論:
+
+| 手法 | 推奨? | 理由 |
+|---|---|---|
+| `embed_image_tiles`(タイル分割) | ✅ 推奨(既定) | 病変位置が不明な大きい参照画像で単一クロップより一貫して優れる |
+| `search_similar_patches_multi` / `search_top_slides_multi`(タイルごと個別検索→結果統合) | ✅ 推奨(既定) | 複数参照画像はベクトル平均よりこちらの方が頑健 |
+| WSI逆引きの`n_hits_ratio`ソート | ✅ 推奨(既定) | 単純な`n_hits`ソートより7カテゴリ中5カテゴリで改善、追加コストなし |
+| `embed_image_tiles_auto_scale`(倍率自動補正、`lib/mpp_estimation.py`) | ❌ 非推奨 | 画質は改善するが、GT比較では検索精度がほぼ悪化(7カテゴリ中0カテゴリで最良) |
+| `stain_reference=`(Macenko染色正規化) | ❌ 非推奨 | 同上。ケースによっては大きく悪化する |
+| `embed_image(..., resize_mode="centercrop")`(単一クロップ) | ⚠️ 場合による | 結果の分散が大きく、GTを完全に見失うこともある |
+| `encoder_name="uni_v2"`コーパス(1536次元・256px、`experiments/0004`/`0005`/`0006`) | ⚠️ v1よりやや劣るが僅差(公平な比較後) | クエリ側は`lib.torchstain_normalize.normalize_to_reference`で`data/baseline/63958_x38976_y7616.png`に正規化してから使うこと(`lib.stain_normalize`の自作Macenkoでは不十分——自己一致性0.5〜0.84止まり、torchstainなら0.96〜0.996)。正規化後の公平なGT比較でも7カテゴリ中6カテゴリでv1が優位だが、差は大幅縮小(例: Hypertrophy 94→27)。PQ量子化を細かくする(pq_m 64→96)ことも試したが改善なし。詳細は下記「uni_v2コーパスの調査状況」参照。既定は引き続き`uni_v1`(`experiments/0001`/`0002`) |
+
+新しい前処理・パラメータのアイデアを試すときは、必ず
+`scripts/validate_against_ground_truth.py`で既存パイプラインとground truth比較してから
+採用すること — 目視で綺麗に見えることは検索精度が上がることを意味しない(このプロジェクトで
+2回実際に踏んだ落とし穴)。
+
+## ディレクトリ構成(このプロジェクト固有)
+
+- `lib/manifest.py` — 998スライドを走査し、manifest/slide_meta/学習サンプルを構築
+- `lib/faiss_index.py` — OPQ+IVF+PQインデックスの学習・構築
+- `lib/query_embedding.py` — 任意画像→UNI埋め込み(タイル分割・倍率補正・染色正規化オプション)
+- `lib/search.py` — `PatchIndex`: 類似パッチ検索・WSI逆引き
+- `lib/mpp_estimation.py` — 倍率(MPP)自動推定。**非推奨**、詳細はモジュールdocstring参照
+- `lib/stain_normalize.py` — 自作Macenko染色正規化。**非推奨**、詳細は`embed_image`のdocstring参照
+- `lib/torchstain_normalize.py` — `torchstain`ライブラリ経由のMacenko正規化。uni_v2コーパス
+  (`data/trident_processed_macenko`)のクエリ側正規化に必須(自作`stain_normalize.py`では
+  再現不十分)、詳細はモジュールdocstring参照
+- `lib/visualize.py` — サムネイル上へのヒット位置プロット
+- `lib/raw_patch.py` — openslide経由での実解像度パッチクロップ
+- `experiments/0001_..._build_patch_manifest` → `0002_..._build_faiss_index` → `0003_..._query_demo`
+  (この順で依存。**現行の推奨インデックス**、`uni_v1`・1024次元)
+- `experiments/0004_..._build_patch_manifest_v2` → `0005_..._build_faiss_index_v2`
+  (`uni_v2`・1536次元・pq_m=64版)→ `0006_..._build_faiss_index_v2_pqm96`
+  (同じ元データ、pq_m=96版。詳細は下記「uni_v2コーパスの調査状況」参照)
+- `scripts/validate_against_ground_truth.py` — 新しいパイプライン案をGTで検証するツール(要・使用)
+- `scripts/select_average_patch.py` — 染色正規化用の「典型的な」基準パッチを選ぶ(セットアップ用、実行済み)
+
+## uni_v2コーパスの調査状況(2026-08-14、一旦区切り)
+
+`data/trident_processed_macenko`(TRIDENTのuni_v2エンコーダ・256pxネイティブパッチ・
+torchstainでMacenko正規化済みの生WSIから抽出)という別コーパスを試験的に評価した。
+**結論: `uni_v1`(既定)を置き換えるには至らなかった。** 経緯:
+
+1. 最初にground truth比較したところ7カテゴリ中6カテゴリでv1に劣ったが、原因は
+   モデル性能ではなく、クエリ側の染色正規化がコーパス側(`torchstain`ライブラリ使用)と
+   一致していなかったこと(自作`lib/stain_normalize.py`では自己一致性0.5〜0.84止まり)。
+   `lib/torchstain_normalize.py`で修正し、公平な比較にしたところ差は大幅縮小
+   (例: Hypertrophy best_rank 94→27)。
+2. それでもv1が引き続き優位だったため、`experiments/0005`(pq_m=64、1サブベクトル
+   あたり24次元)のPQ量子化が粗すぎる可能性を疑い、exact(生ベクトル)計算と近似検索の
+   順位を比較する診断を実施。**Hypertrophyカテゴリで、近似検索が300〜400位台に
+   埋もれさせていたスライドが、exact計算では上位10〜20位相当の強いシグナルを
+   持っていることを確認**(例: スライド28741は近似313位だがexact上位11位相当)。
+3. これを受けて`experiments/0006`(pq_m=96、v1と同じ1サブベクトルあたり16次元)で
+   インデックスを再構築し、GT比較をやり直した。**しかし改善は誤差レベルに留まった**
+   (Hypertrophy best_rankは27のまま、Glycogenはむしろ107→127に悪化)。
+   nprobeを64→256に上げる追加検証でも27→25とごくわずかな改善のみだったことも
+   踏まえ、**「埋もれた強いシグナルが近似検索で見つからない」問題の主因はPQの
+   量子化精度ではなく、IVFの粗いクラスタリング(nlist=4096、nprobeが探索する
+   クラスタ数)側にある可能性が高い**、という所見で一旦区切っている
+   (深追いすればnlist自体を大きくする、GT関連スライドが同じクラスタに
+   収まっているか確認する、といった方向性はあるが未着手)。
+
+**現状のデフォルト**: `scripts/validate_against_ground_truth.py::load_v2_index()`は
+`experiments/0005`(pq_m=64、改善は無いがシンプルでインデックスも小さい)を指す。
+`experiments/0006`(pq_m=96)は参考用に残置(`exp_dir=`引数で指定すれば使える)。
+再びこの調査を引き継ぐ場合は、上記3までで判明している「IVFクラスタリング側の
+問題」という仮説の検証(nlist引き上げ、またはGT該当スライドが実際にどのクラスタに
+属しているかの直接確認)から始めるのが自然な続き。
+
+---
+
+以下は本プロジェクトが使っている実験管理システム(Slurm/PBS)自体の共通ドキュメント。
+
 # Experiment Management System
 
 SlurmおよびPBS (qsub/Miyabi) ベースの実験管理システムです。自動でスケジューラを判別し、実験の作成・投入・通知・再開をコマンド一つで行えます。

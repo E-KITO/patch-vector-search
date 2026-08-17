@@ -53,6 +53,12 @@ dependencies = [
     "sentencepiece",
     "vllm>=0.22.0",
     "matplotlib-venn>=1.1.2",
+    "h5py",
+    "pillow",
+    "openslide-python",
+    "faiss-cpu",
+    "trident",
+    "torchstain>=1.4.1",
 ]
 
 
@@ -75,3 +81,9 @@ explicit = true
 torch = { index = "pytorch-cu130" }
 torchvision = { index = "pytorch-cu130" }
 torchaudio = { index = "pytorch-cu130" }
+
+# TRIDENTはPyPIには無いため、GitHubから直接インストールする(Submodule化は不要)。
+# revは 00-utils/wsi_preprocess と同じコミットに固定している。
+# features_uni_v1/*.h5 を生成したパイプラインと同じ前処理(eval_transforms)を
+# 使うために、異なるコミットへは上げないこと。
+trident = { git = "https://github.com/mahmoodlab/TRIDENT.git", rev = "457756c82946167f3400ce614f3141504f9318d9" }
