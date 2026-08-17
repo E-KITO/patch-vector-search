@@ -153,8 +153,10 @@ def main() -> None:
             tiles, scale, debug = embed_image_tiles_auto_scale(
                 image_path, centroids, tile_size=tile_size, stain_reference=args.stain_reference
             )
-            logger.info(f"  {image_path}: auto-scaled by {scale}x (similarities={debug['similarities']})")
-            scale_info.append({"image": image_path, "scale_factor": scale, "similarities": debug["similarities"]})
+            logger.info(
+                f"  {image_path}: auto-scaled by {scale}x (median_unclipped={debug['median_scale_unclipped']}, n_kept={debug['n_kept']}/{debug['n_tiles']})"
+            )
+            scale_info.append({"image": image_path, "scale_factor": scale, "debug": debug})
         else:
             tiles = embed_image_tiles(image_path, tile_size=tile_size, stain_reference=args.stain_reference)
             scale_info.append({"image": image_path, "scale_factor": 1.0, "similarities": None})
