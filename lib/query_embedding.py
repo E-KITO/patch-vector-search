@@ -226,10 +226,10 @@ def embed_image_tiles(
             in-distribution ones — not a safe default).
 
     Returns:
-        (n_tiles, 1024) float32 array, each row L2-normalized. Near-blank
+        (n_tiles, dim) float32 array, each row L2-normalized, where dim depends on
+        encoder_name (1024 for uni_v1, 1536 for uni_v2). Near-blank
         background tiles (see _is_blank_tile) are dropped before embedding —
         n_tiles can be smaller than the full grid size, and is never zero
-        (falls back to the full grid if every tile is blank).
     """
     import torch
 
