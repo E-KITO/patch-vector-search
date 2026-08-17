@@ -213,9 +213,7 @@ class PatchIndex:
         tiles) so a slide's n_hits reflects breadth of matching content, not
         repeat hits on the same patch.
 
-        Args:
-            query_vecs: (n_tiles, 1024) L2-normalized query embeddings.
-            k_candidates: Candidate pool size per tile (see search_top_slides).
+            query_vecs: (n_tiles, dim) L2-normalized query embeddings.
             nprobe: Number of IVF clusters to probe.
             top_n_slides: Number of top slides to return.
 
