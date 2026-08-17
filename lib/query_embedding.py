@@ -133,8 +133,8 @@ def embed_image(
               comparison in this project's memory/plan notes.
 
     Returns:
-        L2-normalized float32 embedding of shape (1024,), directly comparable
-        (via inner product / cosine similarity) to lib.faiss_index's index.
+        L2-normalized float32 embedding of shape (dim,), where dim depends on
+        encoder_name (1024 for uni_v1, 1536 for uni_v2).
     """
     import torch
 
