@@ -55,6 +55,7 @@ dependencies = [
     "matplotlib-venn>=1.1.2",
     "h5py",
     "pillow",
+    "openslide-python",
     "faiss-cpu",
     "trident",
     "torchstain>=1.4.1",
