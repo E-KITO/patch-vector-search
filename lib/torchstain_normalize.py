@@ -44,9 +44,18 @@ def normalize_to_reference(image, reference_image) -> Image.Image:
     """
     from torchstain.numpy.normalizers import NumpyMacenkoNormalizer
 
-    normalizer = NumpyMacenkoNormalizer()
-    normalizer.fit(_load_rgb_array(reference_image))
-
+    if isinstance(reference_image, (str, Path)):
+        cache = getattr(normalize_to_reference, "_cache", {})
+        key = str(reference_image)
+        if key not in cache:
+            n = NumpyMacenkoNormalizer()
+            n.fit(_load_rgb_array(reference_image))
+            cache[key] = n
+            normalize_to_reference._cache = cache
+        normalizer = cache[key]
+    else:
+        normalizer = NumpyMacenkoNormalizer()
+        normalizer.fit(_load_rgb_array(reference_image))
     arr = _load_rgb_array(image)
     norm_arr, _, _ = normalizer.normalize(I=arr, stains=True)
     norm_arr = np.clip(norm_arr, 0, 255).astype(np.uint8)
