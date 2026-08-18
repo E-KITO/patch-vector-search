@@ -1,14 +1,13 @@
 #!/bin/bash
 #SBATCH --job-name=0006_20260814_build_faiss_index_v2_pqm96
-#SBATCH --partition=large-andre01
-#SBATCH --output=/workspace/andre01/honzawa/02-playground/patch-vector-search/logs/0006_20260814_build_faiss_index_v2_pqm96/%j_0006_20260814_build_faiss_index_v2_pqm96.out
-#SBATCH --error=/workspace/andre01/honzawa/02-playground/patch-vector-search/logs/0006_20260814_build_faiss_index_v2_pqm96/%j_0006_20260814_build_faiss_index_v2_pqm96.out
+#SBATCH --partition=large-creator-i
+#SBATCH --output=/workspace/filesrv02/kito/patch-vector-search/logs/0006_20260814_build_faiss_index_v2_pqm96/%j_0006_20260814_build_faiss_index_v2_pqm96.out
+#SBATCH --error=/workspace/filesrv02/kito/patch-vector-search/logs/0006_20260814_build_faiss_index_v2_pqm96/%j_0006_20260814_build_faiss_index_v2_pqm96.out
 #SBATCH --signal=B:USR1@144
 #SBATCH --export=ALL
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=20
 #SBATCH --mem=96g
-#SBATCH --time=4:00:00
 # CPU-only: FAISSのKMeans/OPQ/PQ学習+全999ファイル(~83GB、1536次元)を読んで
 # add_with_idsする重量級パス(I/O支配)。v1(1024次元・64g)よりベクトルが大きい分
 # 余裕を見て96gに設定。GPU不要。
@@ -20,8 +19,8 @@
 
 # Array run にする場合、上の3行の --output/--error/この直後の --array を
 # 以下の2行に置き換える（%j→%A_%a、--array=0-N を追加。Nの決め方は下記参照）:
-# #SBATCH --output=/workspace/andre01/honzawa/02-playground/patch-vector-search/logs/0006_20260814_build_faiss_index_v2_pqm96/%A_%a_0006_20260814_build_faiss_index_v2_pqm96.out
-# #SBATCH --error=/workspace/andre01/honzawa/02-playground/patch-vector-search/logs/0006_20260814_build_faiss_index_v2_pqm96/%A_%a_0006_20260814_build_faiss_index_v2_pqm96.out
+# #SBATCH --output=/workspace/filesrv02/kito/patch-vector-search/logs/0006_20260814_build_faiss_index_v2_pqm96/%A_%a_0006_20260814_build_faiss_index_v2_pqm96.out
+# #SBATCH --error=/workspace/filesrv02/kito/patch-vector-search/logs/0006_20260814_build_faiss_index_v2_pqm96/%A_%a_0006_20260814_build_faiss_index_v2_pqm96.out
 # #SBATCH --array=0-N
 #
 # ⚠️ 注意: リソース(--gres/--cpus-per-task/--mem/--time)を変更したら、
@@ -30,7 +29,7 @@
 # ⚠️ 注意: シェル上での for/while ループによる複数組み合わせ実行は推奨しない。
 #          下記の Array run / Seq run の使用を推奨。
 
-export PROJECT_ROOT="/workspace/andre01/honzawa/02-playground/patch-vector-search"
+export PROJECT_ROOT="/workspace/filesrv02/kito/patch-vector-search"
 export EXP_NAME="0006_20260814_build_faiss_index_v2_pqm96"
 
 # =====================================================
