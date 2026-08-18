@@ -7,3 +7,5 @@ else
     printf 'WARNING: template shell loader is missing; helpers were not loaded.\n' >&2
 fi
 unset TEMPLATE_DAILY_ROOT
+
+source "/workspace/filesrv02/kito/patch-vector-search/shell/template-daily.sh"
