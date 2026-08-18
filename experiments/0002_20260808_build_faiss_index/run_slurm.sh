@@ -6,7 +6,7 @@
 #SBATCH --signal=B:USR1@144
 #SBATCH --export=ALL
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=20
+#SBATCH --cpus-per-task=16
 #SBATCH --mem=64g
 #SBATCH --time=4:00:00
 # CPU-only: FAISSのKMeans/OPQ/PQ学習+全998ファイル(~78GB)を読んでadd_with_idsする
