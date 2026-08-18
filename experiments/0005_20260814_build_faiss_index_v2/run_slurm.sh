@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=0005_20260814_build_faiss_index_v2
-#SBATCH --partition=large-andre01
+#SBATCH --partition=large-creator-i
 #SBATCH --output=/workspace/andre01/honzawa/02-playground/patch-vector-search/logs/0005_20260814_build_faiss_index_v2/%j_0005_20260814_build_faiss_index_v2.out
 #SBATCH --error=/workspace/andre01/honzawa/02-playground/patch-vector-search/logs/0005_20260814_build_faiss_index_v2/%j_0005_20260814_build_faiss_index_v2.out
 #SBATCH --signal=B:USR1@144
@@ -8,7 +8,6 @@
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=20
 #SBATCH --mem=96g
-#SBATCH --time=4:00:00
 # CPU-only: FAISSのKMeans/OPQ/PQ学習+全999ファイル(~83GB、1536次元)を読んで
 # add_with_idsする重量級パス(I/O支配)。v1(1024次元・64g)よりベクトルが大きい分
 # 余裕を見て96gに設定。GPU不要。

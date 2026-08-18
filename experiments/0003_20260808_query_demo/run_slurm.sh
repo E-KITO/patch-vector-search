@@ -1,15 +1,14 @@
 #!/bin/bash
 #SBATCH --job-name=0003_20260808_query_demo
-#SBATCH --partition=small-andre01
-#SBATCH --output=/workspace/andre01/honzawa/02-playground/patch-vector-search/logs/0003_20260808_query_demo/%j_0003_20260808_query_demo.out
-#SBATCH --error=/workspace/andre01/honzawa/02-playground/patch-vector-search/logs/0003_20260808_query_demo/%j_0003_20260808_query_demo.out
+#SBATCH --partition=small-creator-i
+#SBATCH --output=/workspace/filesrv02/kito/patch-vector-search/logs/0003_20260808_query_demo/%j_0003_20260808_query_demo.out
+#SBATCH --error=/workspace/filesrv02/kito/patch-vector-search/logs/0003_20260808_query_demo/%j_0003_20260808_query_demo.out
 #SBATCH --signal=B:USR1@36
 #SBATCH --export=ALL
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32g
-#SBATCH --time=1:00:00
 # 1枚の画像embed+検索だけの軽量ジョブ。GPUはUNI推論を速くするために残しているが、
 # lib/query_embedding.pyはGPU無し(cuda利用不可)でも自動的にfloat32のCPU実行にフォールバックする。
 
@@ -20,8 +19,8 @@
 
 # Array run にする場合、上の3行の --output/--error/この直後の --array を
 # 以下の2行に置き換える（%j→%A_%a、--array=0-N を追加。Nの決め方は下記参照）:
-# #SBATCH --output=/workspace/andre01/honzawa/02-playground/patch-vector-search/logs/0003_20260808_query_demo/%A_%a_0003_20260808_query_demo.out
-# #SBATCH --error=/workspace/andre01/honzawa/02-playground/patch-vector-search/logs/0003_20260808_query_demo/%A_%a_0003_20260808_query_demo.out
+# #SBATCH --output=/workspace/filesrv02/kito/patch-vector-search/logs/0003_20260808_query_demo/%A_%a_0003_20260808_query_demo.out
+# #SBATCH --error=/workspace/filesrv02/kito/patch-vector-search/logs/0003_20260808_query_demo/%A_%a_0003_20260808_query_demo.out
 # #SBATCH --array=0-N
 #
 # ⚠️ 注意: リソース(--gres/--cpus-per-task/--mem/--time)を変更したら、
@@ -30,7 +29,7 @@
 # ⚠️ 注意: シェル上での for/while ループによる複数組み合わせ実行は推奨しない。
 #          下記の Array run / Seq run の使用を推奨。
 
-export PROJECT_ROOT="/workspace/andre01/honzawa/02-playground/patch-vector-search"
+export PROJECT_ROOT="/workspace/filesrv02/kito/patch-vector-search"
 export EXP_NAME="0003_20260808_query_demo"
 
 # =====================================================

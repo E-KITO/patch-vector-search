@@ -1,14 +1,13 @@
 #!/bin/bash
 #SBATCH --job-name=0004_20260814_build_patch_manifest_v2
-#SBATCH --partition=medium-andre01
-#SBATCH --output=/workspace/andre01/honzawa/02-playground/patch-vector-search/logs/0004_20260814_build_patch_manifest_v2/%j_0004_20260814_build_patch_manifest_v2.out
-#SBATCH --error=/workspace/andre01/honzawa/02-playground/patch-vector-search/logs/0004_20260814_build_patch_manifest_v2/%j_0004_20260814_build_patch_manifest_v2.out
+#SBATCH --partition=medium-creator-i
+#SBATCH --output=/workspace/filesrv02/kito/patch-vector-search/logs/0004_20260814_build_patch_manifest_v2/%j_0004_20260814_build_patch_manifest_v2.out
+#SBATCH --error=/workspace/filesrv02/kito/patch-vector-search/logs/0004_20260814_build_patch_manifest_v2/%j_0004_20260814_build_patch_manifest_v2.out
 #SBATCH --signal=B:USR1@72
 #SBATCH --export=ALL
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32g
-#SBATCH --time=2:00:00
 # CPU-only: coords走査+998ファイル中~100枚だけfeaturesフル読み込み(学習サンプル収集)する
 # 軽量パス。GPU不要なので--gres=gpu:1は外している。実測時間を見てから0002のリソースを決める。
 
@@ -19,8 +18,8 @@
 
 # Array run にする場合、上の3行の --output/--error/この直後の --array を
 # 以下の2行に置き換える（%j→%A_%a、--array=0-N を追加。Nの決め方は下記参照）:
-# #SBATCH --output=/workspace/andre01/honzawa/02-playground/patch-vector-search/logs/0004_20260814_build_patch_manifest_v2/%A_%a_0004_20260814_build_patch_manifest_v2.out
-# #SBATCH --error=/workspace/andre01/honzawa/02-playground/patch-vector-search/logs/0004_20260814_build_patch_manifest_v2/%A_%a_0004_20260814_build_patch_manifest_v2.out
+# #SBATCH --output=/workspace/filesrv02/kito/patch-vector-search/logs/0004_20260814_build_patch_manifest_v2/%A_%a_0004_20260814_build_patch_manifest_v2.out
+# #SBATCH --error=/workspace/filesrv02/kito/patch-vector-search/logs/0004_20260814_build_patch_manifest_v2/%A_%a_0004_20260814_build_patch_manifest_v2.out
 # #SBATCH --array=0-N
 #
 # ⚠️ 注意: リソース(--gres/--cpus-per-task/--mem/--time)を変更したら、
@@ -29,7 +28,7 @@
 # ⚠️ 注意: シェル上での for/while ループによる複数組み合わせ実行は推奨しない。
 #          下記の Array run / Seq run の使用を推奨。
 
-export PROJECT_ROOT="/workspace/andre01/honzawa/02-playground/patch-vector-search"
+export PROJECT_ROOT="/workspace/filesrv02/kito/patch-vector-search"
 export EXP_NAME="0004_20260814_build_patch_manifest_v2"
 
 # =====================================================
