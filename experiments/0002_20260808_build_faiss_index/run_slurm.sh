@@ -8,6 +8,7 @@
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=20
 #SBATCH --mem=64g
+#SBATCH --time=4:00:00
 # CPU-only: FAISSのKMeans/OPQ/PQ学習+全998ファイル(~78GB)を読んでadd_with_idsする
 # 重量級パス(I/O支配)。0001の実測時間を見てから調整すること。GPU不要。
 

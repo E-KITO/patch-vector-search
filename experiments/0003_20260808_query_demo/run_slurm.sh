@@ -9,6 +9,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32g
+#SBATCH --time=1:00:00
 # 1枚の画像embed+検索だけの軽量ジョブ。GPUはUNI推論を速くするために残しているが、
 # lib/query_embedding.pyはGPU無し(cuda利用不可)でも自動的にfloat32のCPU実行にフォールバックする。
 
