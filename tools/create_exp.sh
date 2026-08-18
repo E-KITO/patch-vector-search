@@ -112,6 +112,7 @@ _resolve_partition() {
         /workspace/david01/*) owner="david01" ;;
         /workspace/david02/*) owner="david02" ;;
         /workspace/filesrv01/*) owner="creator" ;;
+        /workspace/filesrv02/*) owner="creator" ;;
         /workspace/grace01/*) owner="grace01" ;;
         /workspace/grace02/*) owner="grace02" ;;
         *)
