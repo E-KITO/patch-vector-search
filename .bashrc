@@ -9,3 +9,5 @@ fi
 unset TEMPLATE_DAILY_ROOT
 
 source "/workspace/filesrv02/kito/patch-vector-search/shell/template-daily.sh"
+
+export SIF_PATH="/workspace/filesrv02/kito/patch-vector-search/env.sif"
