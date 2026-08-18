@@ -234,3 +234,6 @@ experiments/latest
 # agentrun capsule
 .agent-runs/
 .agentrun.lock
+
+# workspace-local config
+.workspace_rc
