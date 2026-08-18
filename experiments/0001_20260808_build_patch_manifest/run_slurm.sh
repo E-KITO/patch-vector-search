@@ -8,6 +8,7 @@
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32g
+#SBATCH --time=2:00:00
 # CPU-only: coords走査+998ファイル中~100枚だけfeaturesフル読み込み(学習サンプル収集)する
 # 軽量パス。GPU不要なので--gres=gpu:1は外している。実測時間を見てから0002のリソースを決める。
 
