@@ -45,8 +45,11 @@ Ground truth比較(`scripts/validate_against_ground_truth.py`)のクエリ画像
 ## 今後やること
 
 - [ ]  **uni v2など他モデルでの埋め込みを検討する**
-- [ ]  **IVFクラスタリングの粗さが近似検索の精度を下げている可能性の検証**
-- [ ]  **クエリ画像を人手でROIクロップした場合の性能上限を測る**
+- [x]  ~~IVFクラスタリングの粗さが近似検索の精度を下げている可能性の検証~~
+      → 2026-08-19、uni_v1で検証済み・否定的な結論。詳細は下記「IVFクラスタリング
+      仮説の検証状況」参照
+- [ ]  **クエリ画像を人手でROIクロップした場合の性能上限を測る**(↑の調査結果から、
+      次に着手すべき最有力候補)
 - [ ]  **検索結果の可視化を改善する**(現状はサムネイルJPEG上にヒット位置をプロットするだけで、実解像度WSIピクセルは無い。WSIのヒートマップ表示や、ヒットパッチのサムネイル表示など)
 - [ ]  **抽出できる所見・できない所見を精査する**\
 など、いろいろやる。
@@ -201,7 +204,60 @@ torchstainでMacenko正規化済みの生WSIから抽出)という別コーパ�
 `experiments/0006`(pq_m=96)は参考用に残置(`exp_dir=`引数で指定すれば使える)。
 再びこの調査を引き継ぐ場合は、上記3までで判明している「IVFクラスタリング側の
 問題」という仮説の検証(nlist引き上げ、またはGT該当スライドが実際にどのクラスタに
-属しているかの直接確認)から始めるのが自然な続き。
+属しているかの直接確認)から始めるのが自然な続き——だったが、下記の通りuni_v1で
+この仮説自体を検証し、否定的な結論に至ったため、優先度は下がっている。
+
+## IVFクラスタリング仮説の検証状況(uni_v1、2026-08-19)
+
+上のuni_v2調査で浮上した「IVFクラスタリング(`nlist`/`nprobe`)側の近似誤差が
+GT正解スライドの順位を大きく落としているのでは」という仮説を、**既定の
+uni_v1索引(`experiments/0001`/`0002`)に対しても切り分けて検証した。
+結論: uni_v1でも支持されなかった。** 0004〜0006(uni_v2系)の実行・再構築は
+不要で、既存のv1索引だけで検証できた。
+
+経緯:
+
+1. **ベースライン取得**(`scripts/adhoc_validate_against_ground_truth.sh`、
+   `nprobe=64`固定): `outputs/gt_validation_results.csv`。7カテゴリ中、
+   Kupffer細胞増殖(best_rank=202)・封入体(best_rank=480)が特に悪く、
+   いずれも`found=n_gt`(正解は候補プールには入っている)。
+2. **nprobeスイープ**(`scripts/adhoc_nprobe_sweep.sh` → `scripts/nprobe_sweep.py`、
+   `nprobe=64/256/1024/4096`): `outputs/gt_validation_nprobe_sweep.csv`。
+   `nprobe=1024`以降はほぼ飽和。`nprobe=4096`(=`nlist`、全クラスタ探索、
+   クラスタ探索の取りこぼしが理論上ゼロになる設定)にしてもKupffer細胞増殖は
+   202→202で不変、封入体は480→399とわずかに改善するのみ。
+   **→クラスタ探索の取りこぼし(coverage)が主因という仮説は否定的。**
+3. **exact-vs-approximate診断**(`scripts/adhoc_exact_vs_approx_diagnostic.sh` →
+   `scripts/exact_vs_approx_diagnostic.py`): `outputs/gt_validation_exact_vs_approx.csv`。
+   FAISSのPQ近似スコアを、`PatchIndex._exact_similarity`による厳密(生float32)
+   スコアに置き換えて同一候補プール内で再ランキング。Kupffer細胞増殖は
+   462→443(ほぼ誤差)、封入体は528→532(むしろ悪化)。
+   **→PQ量子化誤差が主因という仮説も否定的。**
+   - 初回実装には2つのバグがあり修正済み: (a) ランキングキーが`n_hits_ratio`
+     (候補プールに入るか否かの件数ベース)になっており、類似度の値(近似/厳密)
+     を全く反映しない設計だった → `max_similarity`に変更。(b)
+     `MAX_TILES_RERANKED=8`の上限により、Kupffer細胞増殖・封入体でGT
+     スライドが候補プールに0件だった → この2カテゴリのみ全タイル対象
+     (`FULL_TILE_CATEGORIES`)に変更。
+
+**結論**: nprobe(クラスタ探索の取りこぼし)・PQ量子化誤差のどちらも、
+Kupffer細胞増殖・封入体の順位低迷の主因ではない。厳密計算(近似誤差ゼロ)
+でもこれらのスライドは順位が低いままなので、**`nlist`を変えて索引を
+再構築しても改善する見込みは薄い**と考えられる(`nlist`はPQ近似精度にのみ
+影響し、厳密スコア自体には影響しないため)。原因はモデル・索引側ではなく、
+**クエリ画像(NNLアトラス図版)の内容側**(所見と無関係なタイルの混入など)
+にある可能性が高い。次に着手すべきは上の「今後やること」にある、
+手動ROIクロップでの性能上限測定。
+
+検証用スクリプトは`experiments/`ではなく`scripts/`直下に置いている
+(索引を作らない一回性の診断のため、既存の`validate_against_ground_truth.py`
+と同じカテゴリ):
+
+| スクリプト | 内容 | 出力 |
+|---|---|---|
+| `scripts/adhoc_validate_against_ground_truth.sh` | GTベースライン(`nprobe=64`) | `outputs/gt_validation_results.csv` |
+| `scripts/nprobe_sweep.py` / `scripts/adhoc_nprobe_sweep.sh` | nprobeスイープ | `outputs/gt_validation_nprobe_sweep.csv` |
+| `scripts/exact_vs_approx_diagnostic.py` / `scripts/adhoc_exact_vs_approx_diagnostic.sh` | 近似 vs 厳密スコア比較 | `outputs/gt_validation_exact_vs_approx.csv` |
 
 ---
 
