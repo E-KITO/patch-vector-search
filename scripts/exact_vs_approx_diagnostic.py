@@ -33,7 +33,22 @@ search_similar_patches_multi already makes in production: rank tiles by a
 cheap raw FAISS score first, and only exact-rerank the top
 MAX_TILES_RERANKED of them. A real signal hiding only in a tile that scores
 poorly even by the raw approximate metric would be missed by this — a
-caveat to keep in mind if this diagnostic comes back negative.
+caveat to keep in mind if this diagnostic comes back negative. FULL_TILE_
+CATEGORIES lifts this cap for the two categories where it actually mattered
+(see below).
+
+v1 (first run) had two bugs, fixed here:
+  1. Ranking was sorted by n_hits_ratio, which only reflects which patches
+     made it into the approximate candidate pool (fixed before exact
+     similarity is ever computed) — not the similarity *value* — so
+     approx_ranked and exact_ranked were always identical by construction.
+     Now sorted by max_similarity, which the exact recomputation can
+     actually move.
+  2. MAX_TILES_RERANKED=8 for every category left Kupffer cell
+     proliferation and Inclusion body (the two worst-ranked, and the whole
+     reason for this diagnostic) with zero candidates found at all — their
+     ground-truth slide's patches weren't among the top-8-tiles' candidate
+     pools. FULL_TILE_CATEGORIES removes the cap for just those two.
 
 Usage:
     .venv/bin/python3 scripts/exact_vs_approx_diagnostic.py
@@ -55,19 +70,34 @@ NPROBE = 4096  # = nlist; the "probe every cluster" setting Step 2 found saturat
 K_CANDIDATES = 8000  # matches the default_pipelines()/run_comparison() convention.
 MAX_TILES_RERANKED = 8  # same cost/coverage trade-off as search_similar_patches_multi (there: 4).
 
+# The two categories where MAX_TILES_RERANKED=8 left zero candidates found in
+# the first run — reranking every tile instead for just these two, not all 7,
+# to keep the added cost bounded (see the module docstring / conversation).
+FULL_TILE_CATEGORIES = {
+    "Liver, Kupffer Cell - Hyperplasia - Nonneoplastic Lesion Atlas",
+    "Liver, Hepatocyte - Cytoplasmic Inclusions - Nonneoplastic Lesion Atlas",
+}
+
 
 def _rank_slides(combined: pd.DataFrame, similarity_col: str, slide_meta: pd.DataFrame) -> pd.DataFrame:
     """Aggregate deduplicated per-patch similarities to a slide-level ranking,
-    same shape/logic as PatchIndex.search_top_slides's return value."""
+    same shape as PatchIndex.search_top_slides's return value, but ranked by
+    max_similarity (not n_hits_ratio) — see the module docstring's bug #1:
+    n_hits_ratio can't distinguish approx from exact scoring since candidate
+    pool membership is fixed before exact similarity is ever computed."""
     agg = combined.groupby("slide_id")[similarity_col].agg(n_hits="size", mean_similarity="mean", max_similarity="max")
     agg = agg.join(slide_meta[["total_patches"]])
     agg["n_hits_ratio"] = agg["n_hits"] / agg["total_patches"]
-    return agg.sort_values("n_hits_ratio", ascending=False).reset_index()
+    return agg.sort_values("max_similarity", ascending=False).reset_index()
 
 
-def approx_vs_exact_ranking(pi, tiles: np.ndarray) -> tuple[pd.DataFrame, pd.DataFrame]:
+def approx_vs_exact_ranking(pi, tiles: np.ndarray, max_tiles_reranked: int | None) -> tuple[pd.DataFrame, pd.DataFrame]:
     """For the top-scoring tiles of one reference image set, retrieve the
     approximate FAISS candidate pool and recompute exact similarity for it.
+
+    Args:
+        max_tiles_reranked: Only rerank the top-scoring this-many tiles
+            (cost control). None reranks every tile (see FULL_TILE_CATEGORIES).
 
     Returns (approx_ranked, exact_ranked): slide-level rankings built from
     the *same* candidate patches, one scored with FAISS's PQ-approximate
@@ -77,7 +107,8 @@ def approx_vs_exact_ranking(pi, tiles: np.ndarray) -> tuple[pd.DataFrame, pd.Dat
     tiles = np.atleast_2d(tiles).astype(np.float32)
 
     approx_scores = pi.index.search(tiles, 1)[0][:, 0]
-    top_tile_idx = np.argsort(approx_scores)[::-1][:MAX_TILES_RERANKED]
+    order = np.argsort(approx_scores)[::-1]
+    top_tile_idx = order if max_tiles_reranked is None else order[:max_tiles_reranked]
 
     frames = []
     for i in top_tile_idx:
@@ -114,6 +145,9 @@ def main() -> None:
     corpus_slide_ids = set(pi.slide_meta.index.astype(str))
 
     results = []
+    out_path = Path("outputs/gt_validation_exact_vs_approx.csv")
+    out_path.parent.mkdir(exist_ok=True)
+
     t_all = time.time()
     for cat_dir_name, finding_type in CATEGORIES.items():
         cat_dir = ATLAS_DIR / cat_dir_name
@@ -123,9 +157,12 @@ def main() -> None:
             continue
         label = cat_dir_name.split(" - ")[0][:25]
 
+        max_tiles_reranked = None if cat_dir_name in FULL_TILE_CATEGORIES else MAX_TILES_RERANKED
+        t_cat = time.time()
+
         gt_slides = set(gt.loc[gt.FINDING_TYPE == finding_type, "slide_id"]) & corpus_slide_ids
         tiles = embed_fn(images)
-        approx_ranked, exact_ranked = approx_vs_exact_ranking(pi, tiles)
+        approx_ranked, exact_ranked = approx_vs_exact_ranking(pi, tiles, max_tiles_reranked)
 
         approx_stats = rank_stats(approx_ranked, gt_slides)
         exact_stats = rank_stats(exact_ranked, gt_slides)
@@ -141,14 +178,15 @@ def main() -> None:
             "exact_mean": exact_stats["mean_rank"],
         }
         results.append(row)
-        print(row, flush=True)
+        print(f"[{time.time() - t_cat:.1f}s] {row}", flush=True)
+
+        # Write after every category, not just at the end: the two
+        # FULL_TILE_CATEGORIES runs are the expensive, less-predictable part
+        # of this job, so a partial file survives a timeout instead of
+        # losing every category's results.
+        pd.DataFrame(results).to_csv(out_path, index=False)
 
     print(f"\nTOTAL: {time.time() - t_all:.1f}s")
-
-    df = pd.DataFrame(results)
-    out_path = Path("outputs/gt_validation_exact_vs_approx.csv")
-    out_path.parent.mkdir(exist_ok=True)
-    df.to_csv(out_path, index=False)
     print(f"\nwrote {out_path}")
 
 

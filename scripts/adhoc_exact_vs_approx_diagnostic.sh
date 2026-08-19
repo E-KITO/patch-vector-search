@@ -1,20 +1,25 @@
 #!/bin/bash
 #SBATCH --job-name=adhoc_exact_vs_approx_diagnostic
-#SBATCH --partition=medium-creator-i
+#SBATCH --partition=large-creator-i
 #SBATCH --output=/workspace/filesrv02/kito/patch-vector-search/logs/adhoc_exact_vs_approx_diagnostic/%j.out
 #SBATCH --error=/workspace/filesrv02/kito/patch-vector-search/logs/adhoc_exact_vs_approx_diagnostic/%j.out
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32g
-#SBATCH --time=2:00:00
+#SBATCH --time=4:00:00
 # Step 3: scripts/exact_vs_approx_diagnostic.py を実行し、7カテゴリそれぞれで
 # 近似(PQ)スコアによるランキングと、厳密(exact)スコアで再計算したランキングを
-# 比較する。カテゴリごとに最大MAX_TILES_RERANKED=8タイル×候補8000件をh5から
-# 読み直して厳密計算するため、Step 1/2よりI/Oコストが増える見込み。
-# time-limitはStep 1/2の1時間から2時間へ余裕を持たせている
+# 比較する。多くのカテゴリは最大MAX_TILES_RERANKED=8タイルに絞って厳密計算するが、
+# Kupffer細胞増殖・封入体(FULL_TILE_CATEGORIES)の2カテゴリのみ全タイル対象に
+# するため、そこだけI/Oコストが大きく増える見込み(実測ログから1タイルあたり
+# 約10秒、対象2カテゴリ計6画像の全タイル数は未計測だが数百枚程度と推定 —
+# 会話内の見積もりでは10〜50分程度増える想定、ただし不確実性が大きいため
+# time-limitは前回の2時間から4時間へ余裕を持たせている)。
 # (experiments/0003_..._query_demo / adhoc_validate_against_ground_truth.sh
 # と同等のGPU/CPU/メモリ設定)。
+# 途中でタイムアウトしても、scripts/exact_vs_approx_diagnostic.py は
+# カテゴリ処理ごとにCSVを書き出すため、それまでの結果は失われない。
 
 set -euo pipefail
 
