@@ -56,9 +56,9 @@ PYTHON_PATH="${PROJECT_ROOT}/experiments/${EXP_NAME}/experiment.py"
 # Single run（デフォルト）
 # =====================================================
 
-RUN_MODE="single"
+# RUN_MODE="single"
 # ⚠️ 投入前に --image を実際のクエリ画像パスへ書き換えること
-RUN_COMMAND="python ${PYTHON_PATH} --config config.yml --image ${PROJECT_ROOT}/data/query/query_001.png"
+# RUN_COMMAND="python ${PYTHON_PATH} --config config.yml --image ${PROJECT_ROOT}/data/query/query_001.png"
 
 # =====================================================
 # Array run にしたい場合
@@ -93,14 +93,14 @@ RUN_COMMAND="python ${PYTHON_PATH} --config config.yml --image ${PROJECT_ROOT}/d
 # こちらは #SBATCH --array は不要（1ジョブでループするため）。
 # =====================================================
 
-# RUN_MODE="seq"
-# BASE_COMMAND="python ${PYTHON_PATH}"
-# GRID_ARGS=(
-#     "--model"
-# )
-# GRID_VALUES=(
-#     "bert roberta"
-# )
+RUN_MODE="seq"
+BASE_COMMAND="python ${PYTHON_PATH} --config config.yml"
+GRID_ARGS=(
+    "--image"
+)
+GRID_VALUES=(
+    "${PROJECT_ROOT}/data/query/query_001.png ${PROJECT_ROOT}/data/query/query_002.png ${PROJECT_ROOT}/data/query/query_003.png"
+)
 
 # =====================================================
 # Entry point
