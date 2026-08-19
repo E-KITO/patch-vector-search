@@ -181,7 +181,21 @@ def rank_stats(ranked_df: pd.DataFrame, gt_slides: set[str]) -> dict:
     )
 
 
-def run_comparison(pipelines: dict[str, tuple[PatchIndex, callable]] | None = None) -> pd.DataFrame:
+def run_comparison(
+    pipelines: dict[str, tuple[PatchIndex, callable]] | None = None,
+    nprobe: int = 64,
+) -> pd.DataFrame:
+    """Args:
+        pipelines: see default_pipelines().
+        nprobe: Number of IVF clusters to probe, forwarded to
+            search_top_slides_multi. Default (64) matches the original
+            fixed value this function always used. Raising it (up to
+            nlist=4096, i.e. every cluster) is how to test whether IVF
+            cluster coverage — rather than PQ quantization error — is
+            responsible for a ground-truth slide ranking far worse than its
+            true similarity would suggest (see load_v2_index's docstring for
+            the diagnostic that first surfaced this on the uni_v2 corpus).
+    """
     if pipelines is None:
         pipelines = default_pipelines()
 
@@ -207,7 +221,7 @@ def run_comparison(pipelines: dict[str, tuple[PatchIndex, callable]] | None = No
             row[f"{name}_n_gt"] = len(gt_slides)
 
             tiles = embed_fn(images)
-            ranked = pi.search_top_slides_multi(tiles, k_candidates=8000, nprobe=64, top_n_slides=998)
+            ranked = pi.search_top_slides_multi(tiles, k_candidates=8000, nprobe=nprobe, top_n_slides=998)
             s = rank_stats(ranked, gt_slides)
             row[f"{name}_found"] = s["found"]
             row[f"{name}_best"] = s["best_rank"]
