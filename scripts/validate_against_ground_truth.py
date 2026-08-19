@@ -164,7 +164,8 @@ def default_pipelines() -> dict[str, tuple[PatchIndex, callable]]:
     }
     try:
         pipelines["baseline_v2"] = (load_v2_index(), _embed_v2_normalized)
-    except FileNotFoundError:
+    except (FileNotFoundError, RuntimeError):
+        # faiss.read_index raises RuntimeError (not FileNotFoundError) for a missing file.
         print("NOTE: uni_v2 index not found (run experiments/0004+0005 first) — comparing baseline_v1 only")
     return pipelines
 
