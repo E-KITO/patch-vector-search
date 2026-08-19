@@ -58,7 +58,7 @@ PYTHON_PATH="${PROJECT_ROOT}/experiments/${EXP_NAME}/experiment.py"
 
 RUN_MODE="single"
 # ⚠️ 投入前に --image を実際のクエリ画像パスへ書き換えること
-RUN_COMMAND="python ${PYTHON_PATH} --config config.yml --image ${PROJECT_ROOT}/experiments/0003_20260808_query_demo/sample_query_10306.jpg"
+RUN_COMMAND="python ${PYTHON_PATH} --config config.yml --image ${PROJECT_ROOT}/data/query/query_001.png"
 
 # =====================================================
 # Array run にしたい場合
