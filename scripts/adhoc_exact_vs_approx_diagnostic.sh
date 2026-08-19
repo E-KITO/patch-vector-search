@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=adhoc_exact_vs_approx_diagnostic
-#SBATCH --partition=small-creator-i
+#SBATCH --partition=medium-creator-i
 #SBATCH --output=/workspace/filesrv02/kito/patch-vector-search/logs/adhoc_exact_vs_approx_diagnostic/%j.out
 #SBATCH --error=/workspace/filesrv02/kito/patch-vector-search/logs/adhoc_exact_vs_approx_diagnostic/%j.out
 #SBATCH --nodes=1
