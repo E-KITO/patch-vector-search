@@ -1,9 +1,12 @@
-"""Visualize search hits on a slide's low-resolution thumbnail.
+"""Visualize search hits: as markers on a low-resolution thumbnail, or as
+real-resolution patch crops.
 
-There is no raw WSI pixel access in this project (no openslide-readable
-.svs files) — data/trident_processed/thumbnails/{slide_id}.jpg is the only
-per-slide visual asset available, so hits are shown as markers over it
-rather than as cropped patch images.
+plot_slide_hits_on_thumbnail predates raw WSI pixel access in this project
+and only shows hit *locations* as markers over
+data/trident_processed/thumbnails/{slide_id}.jpg. plot_hit_patch_gallery
+shows what a hit actually looks like, using data/moo_collected_tggate_wsi/
+raw_wsi/{slide_id}.svs (now available for the full uni_v1 corpus) via
+lib.raw_patch.crop_patch.
 """
 from __future__ import annotations
 
@@ -54,5 +57,58 @@ def plot_slide_hits_on_thumbnail(
     )
     ax.set_title(f"{slide_id} — {len(hits_df)} similar patches")
     ax.axis("off")
+    fig.tight_layout()
+    return fig
+
+
+def plot_hit_patch_gallery(
+    hits_df: pd.DataFrame,
+    raw_slide_dir: str | Path,
+    slide_meta: pd.DataFrame,
+    n_cols: int = 5,
+) -> plt.Figure:
+    """Render each hit as its actual real-resolution WSI patch (via
+    lib.raw_patch.crop_patch), arranged in a grid.
+
+    plot_slide_hits_on_thumbnail only shows *where* a hit is, as a dot on a
+    low-resolution thumbnail — it can't show what the hit actually looks
+    like, since (per its docstring) this project originally had no raw WSI
+    pixel access. That's no longer true: data/moo_collected_tggate_wsi/
+    raw_wsi/{slide_id}.svs now covers every slide in the uni_v1 corpus, so
+    hits can be shown as real patch pixels instead of markers — letting a
+    human directly check whether a hit visually looks like the intended
+    finding.
+
+    Args:
+        hits_df: Rows with slide_id, coord_x, coord_y, similarity (e.g.
+            lib.search.PatchIndex.search_similar_patches[_multi] output).
+        raw_slide_dir: Directory containing {slide_id}.svs
+            (data/moo_collected_tggate_wsi/raw_wsi for the uni_v1 corpus).
+        slide_meta: Per-slide metadata indexed by slide_id
+            (lib.search.PatchIndex.slide_meta), must contain
+            patch_size_level0.
+        n_cols: Number of grid columns.
+
+    Returns:
+        matplotlib Figure with one real-resolution patch per hit, each
+        titled with its slide_id and similarity score.
+    """
+    from lib.raw_patch import crop_patch
+
+    n = len(hits_df)
+    n_rows = -(-n // n_cols)  # ceil division
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols * 2.2, n_rows * 2.4), squeeze=False)
+    axes = axes.flatten()
+
+    for ax, row in zip(axes, hits_df.itertuples()):
+        patch_size_level0 = int(slide_meta.loc[row.slide_id, "patch_size_level0"])
+        patch = crop_patch(row.slide_id, row.coord_x, row.coord_y, raw_slide_dir, patch_size_level0)
+        ax.imshow(patch)
+        ax.set_title(f"{row.slide_id}\nsim={row.similarity:.3f}", fontsize=8)
+        ax.axis("off")
+
+    for ax in axes[n:]:
+        ax.axis("off")
+
     fig.tight_layout()
     return fig

@@ -1,9 +1,9 @@
-"""Crop real patch pixels from raw WSI files (data/raw_slide/*.svs).
+"""Crop real patch pixels from raw WSI files (data/moo_collected_tggate_wsi/raw_wsi/*.svs).
 
 Not required by the core search pipeline (lib/manifest.py, lib/faiss_index.py,
 lib/search.py all operate on precomputed UNI features only) — this is a
 visual QC helper for looking at what a search hit actually looks like,
-usable once raw_slide/*.svs is present for the slide in question.
+used by lib.visualize.plot_hit_patch_gallery.
 """
 from __future__ import annotations
 
