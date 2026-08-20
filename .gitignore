@@ -235,5 +235,5 @@ experiments/latest
 .agent-runs/
 .agentrun.lock
 
-# workspace-local config
-.workspace_rc
+# handover document
+patch-vector-search_handover.md
