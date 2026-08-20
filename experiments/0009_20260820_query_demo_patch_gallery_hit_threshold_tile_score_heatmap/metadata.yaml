@@ -1,0 +1,8 @@
+exp_id: 0009
+exp_name: 0009_20260820_query_demo_patch_gallery_hit_threshold_tile_score_heatmap
+created_date: 20260820
+git_commit: 54b814d7d05fe34e20c7ae1a6a8bb712a19a8f65
+resumed_from_exp: 0008_20260820_query_demo_patch_gallery_hit_threshold
+resume_checkpoint_dir: /workspace/filesrv02/kito/patch-vector-search/outputs/0008_20260820_query_demo_patch_gallery_hit_threshold
+resume_checkpoint_file: null
+
