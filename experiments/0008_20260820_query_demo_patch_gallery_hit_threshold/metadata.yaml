@@ -1,0 +1,8 @@
+exp_id: 0008
+exp_name: 0008_20260820_query_demo_patch_gallery_hit_threshold
+created_date: 20260820
+git_commit: 53e41c7ebc2151a019ef153fae6b4681fcc33b5a
+resumed_from_exp: 0007_20260820_query_demo_patch_gallery
+resume_checkpoint_dir: /workspace/filesrv02/kito/patch-vector-search/outputs/0007_20260820_query_demo_patch_gallery
+resume_checkpoint_file: null
+
