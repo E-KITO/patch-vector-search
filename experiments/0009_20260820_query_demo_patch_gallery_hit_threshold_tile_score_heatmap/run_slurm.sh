@@ -58,7 +58,7 @@ PYTHON_PATH="${PROJECT_ROOT}/experiments/${EXP_NAME}/experiment.py"
 
 # RUN_MODE="single"
 # ⚠️ 投入前に --image を実際のクエリ画像パスへ書き換えること
-RUN_COMMAND="python ${PYTHON_PATH} --config config.yml --image ${PROJECT_ROOT}'/data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver/Liver - Fatty Change - Nonneoplastic Lesion Atlas/imgi_6_figure-001-a51651_large.jpg'"
+RUN_COMMAND="python ${PYTHON_PATH} --config config.yml --image ${PROJECT_ROOT}'/data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver/Liver - Fatty Change - Nonneoplastic Lesion Atlas/imgi_7_figure-002-a51652_large.jpg'"
 
 # =====================================================
 # Array run にしたい場合
