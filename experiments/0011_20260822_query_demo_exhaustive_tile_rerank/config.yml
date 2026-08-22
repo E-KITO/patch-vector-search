@@ -1,0 +1,51 @@
+# ============================================================
+# Experiment Configuration
+# ============================================================
+# - Fixed hyperparameters go here.
+# - Variable dimensions (model, seed, prompt, ...) go in run_slurm.sh GRID_ARGS.
+# - Do NOT hardcode values you intend to sweep.
+# ============================================================
+
+# --- Hyperparameters ---
+seed: 42
+# 0002_..._build_faiss_index の出力(project_root相対。index.faiss/manifest.parquet/slide_meta.parquet を含む)
+index_exp_dir: "outputs/0002_20260808_build_faiss_index/default"
+features_dir: "data/trident_processed/20x_224px_0px_overlap/features_uni_v1"
+thumbnails_dir: "data/trident_processed/thumbnails"
+# lib.raw_patch.crop_patch source dir for lib.visualize.plot_hit_patch_gallery
+# (real-resolution WSI pixels, covers every slide in the uni_v1 corpus).
+raw_slide_dir: "data/moo_collected_tggate_wsi/raw_wsi"
+# lib.mpp_estimation.build_scale_reference_centroids output (see
+# lib.mpp_estimation.save_scale_centroids); only loaded if --auto_scale is
+# passed. NOT RECOMMENDED: a 7-category ground-truth comparison found this
+# (with or without --stain_reference) was never the single best option, and
+# combining both was usually worse than either alone or plain tiling with no
+# correction at all — see lib/query_embedding.py's
+# embed_image_tiles_auto_scale docstring for the full comparison table. Kept
+# available and off by default for cases someone wants to re-evaluate it.
+scale_centroids_path: "data/scale_centroids.npz"
+tile_size: 224
+
+# --- Search parameters ---
+k: 20
+nprobe: 32
+rerank_pool: 200
+# How many of a query image's tiles (ranked by cheap approximate FAISS
+# score) get the expensive exact-rerank pass — see
+# lib.search.PatchIndex.search_similar_patches_multi. Was 4; raised to 12
+# after finding that with only 4 slots, a couple of spuriously-high-scoring
+# background tiles could dominate every slot and produce an all-background
+# result (see lib.query_embedding._is_blank_tile, which now filters obvious
+# blank tiles out before this ranking — this margin is extra robustness on
+# top of that, not a replacement for it).
+#
+# 2026-08-22: set to null (no limit, every tile exact-reranked) — the tile
+# score heatmap (lib.visualize.plot_query_tile_scores) showed that even 12
+# slots weren't enough for focal findings like Extramedullary hematopoiesis:
+# the diagnostic tile never won a slot against far more common "ordinary
+# tissue" tiles on the cheap approximate score, so it never got the chance
+# to be exact-reranked at all. Not yet validated against ground truth.
+max_tiles_reranked: null
+k_candidates: 8000
+top_n_slides: 20
+top_n_slides_to_plot: 3
