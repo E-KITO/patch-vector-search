@@ -93,13 +93,16 @@ PYTHON_PATH="${PROJECT_ROOT}/experiments/${EXP_NAME}/experiment.py"
 # こちらは #SBATCH --array は不要（1ジョブでループするため）。
 # =====================================================
 
-# 2026-08-22: MPP補正(--auto_scale)導入方針を受け、難易度の低い所見5カテゴリを
-# auto_scaleありでまとめて検索(GT比較ではなくpatch_gallery/tile_score_heatmapの
-# 目視評価が主目的。Cellular infiltrationはNNLアトラスに同名カテゴリが無いため
-# Inflammation画像で代替)。--auto_scale には事前に data/scale_centroids.npz の
-# 構築(scripts/adhoc_build_scale_centroids.sh)が必要。
+# 2026-08-22: auto_scaleありの前回実行で、タイルスコアヒートマップ(目視)から
+# 「タイル選択バイアス」(近似スコア上位max_tiles_reranked枚だけ厳密再ランキング
+# する事前選抜のせいで、Hematopoiesisのような局所所見の診断タイルが一度も選ばれ
+# ない)が疑われたため、config.ymlのmax_tiles_rerankedをnull(全タイル厳密再
+# ランキング)に変更して単独検証する。auto_scaleとの交絡を避けるため、こちらは
+# auto_scale無しで実行(auto_scale自体は既にFatty Changeで「選ばれても見つから
+# ない」別問題があると分かっている一方、こちらは「選ばれない」問題への対策のため、
+# 変数を分けて確認する)。
 RUN_MODE="seq"
-BASE_COMMAND="python ${PYTHON_PATH} --config config.yml --auto_scale"
+BASE_COMMAND="python ${PYTHON_PATH} --config config.yml"
 GRID_ARGS=(
     "--image"
 )

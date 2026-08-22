@@ -119,7 +119,7 @@ def main() -> None:
     k: int = config.get("k", 20)
     nprobe: int = config.get("nprobe", 32)
     rerank_pool: int = config.get("rerank_pool", 200)
-    max_tiles_reranked: int = config.get("max_tiles_reranked", 4)
+    max_tiles_reranked: int | None = config.get("max_tiles_reranked", 4)
     k_candidates: int = config.get("k_candidates", 8000)
     top_n_slides: int = config.get("top_n_slides", 20)
     top_n_slides_to_plot: int = config.get("top_n_slides_to_plot", 3)

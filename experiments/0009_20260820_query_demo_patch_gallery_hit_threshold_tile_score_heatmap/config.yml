@@ -32,13 +32,20 @@ nprobe: 32
 rerank_pool: 200
 # How many of a query image's tiles (ranked by cheap approximate FAISS
 # score) get the expensive exact-rerank pass — see
-# lib.search.PatchIndex.search_similar_patches_multi. Was 4; raised after
-# finding that with only 4 slots, a couple of spuriously-high-scoring
+# lib.search.PatchIndex.search_similar_patches_multi. Was 4; raised to 12
+# after finding that with only 4 slots, a couple of spuriously-high-scoring
 # background tiles could dominate every slot and produce an all-background
 # result (see lib.query_embedding._is_blank_tile, which now filters obvious
 # blank tiles out before this ranking — this margin is extra robustness on
 # top of that, not a replacement for it).
-max_tiles_reranked: 12
+#
+# 2026-08-22: set to null (no limit, every tile exact-reranked) — the tile
+# score heatmap (lib.visualize.plot_query_tile_scores) showed that even 12
+# slots weren't enough for focal findings like Extramedullary hematopoiesis:
+# the diagnostic tile never won a slot against far more common "ordinary
+# tissue" tiles on the cheap approximate score, so it never got the chance
+# to be exact-reranked at all. Not yet validated against ground truth.
+max_tiles_reranked: null
 k_candidates: 8000
 top_n_slides: 20
 top_n_slides_to_plot: 3

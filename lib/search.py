@@ -156,7 +156,7 @@ class PatchIndex:
         k: int = 20,
         nprobe: int = 32,
         rerank_pool: int = 200,
-        max_tiles_reranked: int = 4,
+        max_tiles_reranked: int | None = 4,
     ) -> pd.DataFrame:
         """search_similar_patches, aggregated over multiple query vectors
         (e.g. the tiles of one large reference image from
@@ -168,6 +168,17 @@ class PatchIndex:
         first ranks tiles by a cheap raw FAISS score (no h5 reads) and only
         exact-reranks the top `max_tiles_reranked` of them.
 
+        2026-08-22: measured (via lib.visualize.plot_query_tile_scores) that
+        this pre-filter itself drops the diagnostic tile for focal findings
+        with few visually-similar patches elsewhere in the corpus (e.g.
+        Extramedullary hematopoiesis) — an unrelated "ordinary tissue" tile
+        outscores it on the cheap approximate score and takes its slot.
+        Passing `max_tiles_reranked=None` disables the pre-filter (every
+        tile gets exact-reranked; `[:None]` is a no-op slice), trading the
+        h5-read cost above for immunity to this failure mode. Not yet
+        validated against ground truth — see README's "タイル選択バイアス"
+        section for the fuller finding this responds to.
+
         Args:
             query_vecs: (n_tiles, 1024) L2-normalized query embeddings.
             k: Number of results to return.
@@ -175,6 +186,7 @@ class PatchIndex:
             rerank_pool: Exact-rerank pool size per reranked tile (see
                 search_similar_patches).
             max_tiles_reranked: How many top-scoring tiles to exact-rerank.
+                None reranks every tile (see above).
 
         Returns:
             DataFrame[slide_id, coord_x, coord_y, similarity], deduplicated
