@@ -1,0 +1,26 @@
+# ============================================================
+# Experiment Configuration
+# ============================================================
+# - Fixed hyperparameters go here.
+# - Variable dimensions (model, seed, prompt, ...) go in run_slurm.sh GRID_ARGS.
+# - Do NOT hardcode values you intend to sweep.
+# ============================================================
+
+# --- Hyperparameters ---
+seed: 42
+# train_sample_sizeは0011(OPQ+IVF+PQ学習、未作成)の入力になる。OPQ学習コストは
+# おおよそ学習ベクトル数に比例して増えるため、大きくしすぎない
+# (500,000は目安。nlist=4096に対しては十分な比率 — FAISSの目安は
+# クラスタあたり数十〜数百点で、500,000/4096≈122点/クラスタ)。
+#
+# 2026-08-22: チーム方針により、コーパス側・クエリ側の両方をコーパス内の
+# 平均的な染色パッチ(data/baseline/63958_x38976_y7616.png、
+# scripts/select_average_patch.pyで選定済み)を基準にMacenkoで正規化した
+# 新コーパスを使う。エンコーダ(uni_v1)・パッチサイズ(224px)は0001から
+# 変更しない — 変わるのは染色正規化の有無のみ。
+# この再エンベディング自体はこのリポジトリの範囲外(外部で実施)。
+# 出力が届いたら下のfeatures_dirを実際のパスに書き換えること。
+# (data/trident_processed_macenko は別件のuni_v2・256px・正規化方法不明の
+# コーパスなので流用不可)
+features_dir: "TBD: 外部で作成される uni_v1 + Macenko正規化(基準=data/baseline/63958_x38976_y7616.png)コーパスのfeatures_dirパスに置き換えること"
+train_sample_size: 500000
