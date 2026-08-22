@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=0009_20260820_query_demo_patch_gallery_hit_threshold_tile_score_heatmap
+#SBATCH --job-name=0011_20260822_query_demo_exhaustive_tile_rerank
 #SBATCH --partition=medium-creator-i
-#SBATCH --output=/workspace/filesrv02/kito/patch-vector-search/logs/0009_20260820_query_demo_patch_gallery_hit_threshold_tile_score_heatmap/%j_0009_20260820_query_demo_patch_gallery_hit_threshold_tile_score_heatmap.out
-#SBATCH --error=/workspace/filesrv02/kito/patch-vector-search/logs/0009_20260820_query_demo_patch_gallery_hit_threshold_tile_score_heatmap/%j_0009_20260820_query_demo_patch_gallery_hit_threshold_tile_score_heatmap.out
+#SBATCH --output=/workspace/filesrv02/kito/patch-vector-search/logs/0011_20260822_query_demo_exhaustive_tile_rerank/%j_0011_20260822_query_demo_exhaustive_tile_rerank.out
+#SBATCH --error=/workspace/filesrv02/kito/patch-vector-search/logs/0011_20260822_query_demo_exhaustive_tile_rerank/%j_0011_20260822_query_demo_exhaustive_tile_rerank.out
 #SBATCH --signal=B:USR1@72
 #SBATCH --export=ALL
 #SBATCH --nodes=1
@@ -20,8 +20,8 @@
 
 # Array run にする場合、上の3行の --output/--error/この直後の --array を
 # 以下の2行に置き換える（%j→%A_%a、--array=0-N を追加。Nの決め方は下記参照）:
-# #SBATCH --output=/workspace/filesrv02/kito/patch-vector-search/logs/0009_20260820_query_demo_patch_gallery_hit_threshold_tile_score_heatmap/%A_%a_0009_20260820_query_demo_patch_gallery_hit_threshold_tile_score_heatmap.out
-# #SBATCH --error=/workspace/filesrv02/kito/patch-vector-search/logs/0009_20260820_query_demo_patch_gallery_hit_threshold_tile_score_heatmap/%A_%a_0009_20260820_query_demo_patch_gallery_hit_threshold_tile_score_heatmap.out
+# #SBATCH --output=/workspace/filesrv02/kito/patch-vector-search/logs/0011_20260822_query_demo_exhaustive_tile_rerank/%A_%a_0011_20260822_query_demo_exhaustive_tile_rerank.out
+# #SBATCH --error=/workspace/filesrv02/kito/patch-vector-search/logs/0011_20260822_query_demo_exhaustive_tile_rerank/%A_%a_0011_20260822_query_demo_exhaustive_tile_rerank.out
 # #SBATCH --array=0-N
 #
 # ⚠️ 注意: リソース(--gres/--cpus-per-task/--mem/--time)を変更したら、
@@ -31,7 +31,7 @@
 #          下記の Array run / Seq run の使用を推奨。
 
 export PROJECT_ROOT="/workspace/filesrv02/kito/patch-vector-search"
-export EXP_NAME="0009_20260820_query_demo_patch_gallery_hit_threshold_tile_score_heatmap"
+export EXP_NAME="0011_20260822_query_demo_exhaustive_tile_rerank"
 
 # =====================================================
 # Storage
@@ -93,7 +93,13 @@ PYTHON_PATH="${PROJECT_ROOT}/experiments/${EXP_NAME}/experiment.py"
 # こちらは #SBATCH --array は不要（1ジョブでループするため）。
 # =====================================================
 
-# 2026-08-22: auto_scaleありの前回実行で、タイルスコアヒートマップ(目視)から
+# 2026-08-22: 0009からの分岐(0009内でmax_tiles_rerankedをnullに変更して
+# 同じ画像ファイル名で再実行したところ、outputs/配下のcompletion.jsonベースの
+# 既完了ガードにより2/5カテゴリ(Hypertrophy・Hematopoiesis)が新設定を使わず
+# サイレントにスキップされたため、検索ロジック自体の変更として新しい実験番号を
+# 切り、5カテゴリ全てを確実にフレッシュな設定で再実行する)。
+#
+# auto_scaleありの前回実行で、タイルスコアヒートマップ(目視)から
 # 「タイル選択バイアス」(近似スコア上位max_tiles_reranked枚だけ厳密再ランキング
 # する事前選抜のせいで、Hematopoiesisのような局所所見の診断タイルが一度も選ばれ
 # ない)が疑われたため、config.ymlのmax_tiles_rerankedをnull(全タイル厳密再

@@ -1,17 +1,16 @@
 #!/bin/bash
-#SBATCH --job-name=0009_20260820_query_demo_patch_gallery_hit_threshold_tile_score_heatmap
+#SBATCH --job-name=0010_20260822_build_patch_manifest_macenko_v1
 #SBATCH --partition=medium-creator-i
-#SBATCH --output=/workspace/filesrv02/kito/patch-vector-search/logs/0009_20260820_query_demo_patch_gallery_hit_threshold_tile_score_heatmap/%j_0009_20260820_query_demo_patch_gallery_hit_threshold_tile_score_heatmap.out
-#SBATCH --error=/workspace/filesrv02/kito/patch-vector-search/logs/0009_20260820_query_demo_patch_gallery_hit_threshold_tile_score_heatmap/%j_0009_20260820_query_demo_patch_gallery_hit_threshold_tile_score_heatmap.out
+#SBATCH --output=/workspace/filesrv02/kito/patch-vector-search/logs/0010_20260822_build_patch_manifest_macenko_v1/%j_0010_20260822_build_patch_manifest_macenko_v1.out
+#SBATCH --error=/workspace/filesrv02/kito/patch-vector-search/logs/0010_20260822_build_patch_manifest_macenko_v1/%j_0010_20260822_build_patch_manifest_macenko_v1.out
 #SBATCH --signal=B:USR1@72
 #SBATCH --export=ALL
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=8
 #SBATCH --mem=32g
 #SBATCH --time=2:00:00
-# 1枚の画像embed+検索だけの軽量ジョブ。GPUはUNI推論を速くするために残しているが、
-# lib/query_embedding.pyはGPU無し(cuda利用不可)でも自動的にfloat32のCPU実行にフォールバックする。
+# CPU-only: coords走査+998ファイル中~100枚だけfeaturesフル読み込み(学習サンプル収集)する
+# 軽量パス。GPU不要なので--gres=gpu:1は外している。実測時間を見てから0002のリソースを決める。
 
 # 他の実験のジョブに依存させたい場合、有効化してjob_idを埋める
 # （job_idは outputs/{依存先exp}/latest_job_id.txt を参照。投入のたびに
@@ -20,8 +19,8 @@
 
 # Array run にする場合、上の3行の --output/--error/この直後の --array を
 # 以下の2行に置き換える（%j→%A_%a、--array=0-N を追加。Nの決め方は下記参照）:
-# #SBATCH --output=/workspace/filesrv02/kito/patch-vector-search/logs/0009_20260820_query_demo_patch_gallery_hit_threshold_tile_score_heatmap/%A_%a_0009_20260820_query_demo_patch_gallery_hit_threshold_tile_score_heatmap.out
-# #SBATCH --error=/workspace/filesrv02/kito/patch-vector-search/logs/0009_20260820_query_demo_patch_gallery_hit_threshold_tile_score_heatmap/%A_%a_0009_20260820_query_demo_patch_gallery_hit_threshold_tile_score_heatmap.out
+# #SBATCH --output=/workspace/filesrv02/kito/patch-vector-search/logs/0010_20260822_build_patch_manifest_macenko_v1/%A_%a_0010_20260822_build_patch_manifest_macenko_v1.out
+# #SBATCH --error=/workspace/filesrv02/kito/patch-vector-search/logs/0010_20260822_build_patch_manifest_macenko_v1/%A_%a_0010_20260822_build_patch_manifest_macenko_v1.out
 # #SBATCH --array=0-N
 #
 # ⚠️ 注意: リソース(--gres/--cpus-per-task/--mem/--time)を変更したら、
@@ -31,7 +30,7 @@
 #          下記の Array run / Seq run の使用を推奨。
 
 export PROJECT_ROOT="/workspace/filesrv02/kito/patch-vector-search"
-export EXP_NAME="0009_20260820_query_demo_patch_gallery_hit_threshold_tile_score_heatmap"
+export EXP_NAME="0010_20260822_build_patch_manifest_macenko_v1"
 
 # =====================================================
 # Storage
@@ -40,11 +39,10 @@ export EXP_NAME="0009_20260820_query_demo_patch_gallery_hit_threshold_tile_score
 # （例: 出力を実行中にリアルタイムで/workspace側から監視したい等）。
 # =====================================================
 
-# このジョブは全998ファイル(~78GB)ではなく、index/manifest(数GB)+exact re-rank用に
-# 開くごく一部のh5+サムネイル数枚しか読まない軽量クエリなので、毎回data/全体を
-# /scratchへステージングするのは無駄。NFS直読みにする。
-USE_LOCAL_SSD_INPUT=0
-USE_LOCAL_SSD_OUTPUT=1
+USE_LOCAL_SSD_INPUT=0  # data/ is now ~1TB (raw_wsi+both trident_processed corpora); doesn't fit /scratch.
+                       # Unused anyway — this project's code always reads via PROJECT_ROOT-relative
+                       # paths (config.yml's features_dir etc.), never via $DATASET_DIR.
+USE_LOCAL_SSD_OUTPUT=0  # /scratch on this cluster was found 100% full (other jobs' leftovers); write directly to workspace instead.
 
 # =====================================================
 # python path
@@ -56,9 +54,8 @@ PYTHON_PATH="${PROJECT_ROOT}/experiments/${EXP_NAME}/experiment.py"
 # Single run（デフォルト）
 # =====================================================
 
-# RUN_MODE="single"
-# ⚠️ 投入前に --image を実際のクエリ画像パスへ書き換えること
-# RUN_COMMAND="python ${PYTHON_PATH} --config config.yml --image ${PROJECT_ROOT}'/data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver/Liver - Necrosis - Nonneoplastic Lesion Atlas/imgi_6_figure-001-a36776_large.jpg'"
+RUN_MODE="single"
+RUN_COMMAND="python ${PYTHON_PATH} --config config.yml"
 
 # =====================================================
 # Array run にしたい場合
@@ -93,22 +90,14 @@ PYTHON_PATH="${PROJECT_ROOT}/experiments/${EXP_NAME}/experiment.py"
 # こちらは #SBATCH --array は不要（1ジョブでループするため）。
 # =====================================================
 
-# 2026-08-22: auto_scaleありの前回実行で、タイルスコアヒートマップ(目視)から
-# 「タイル選択バイアス」(近似スコア上位max_tiles_reranked枚だけ厳密再ランキング
-# する事前選抜のせいで、Hematopoiesisのような局所所見の診断タイルが一度も選ばれ
-# ない)が疑われたため、config.ymlのmax_tiles_rerankedをnull(全タイル厳密再
-# ランキング)に変更して単独検証する。auto_scaleとの交絡を避けるため、こちらは
-# auto_scale無しで実行(auto_scale自体は既にFatty Changeで「選ばれても見つから
-# ない」別問題があると分かっている一方、こちらは「選ばれない」問題への対策のため、
-# 変数を分けて確認する)。
-RUN_MODE="seq"
-BASE_COMMAND="python ${PYTHON_PATH} --config config.yml"
-GRID_ARGS=(
-    "--image"
-)
-GRID_VALUES=(
-    "${PROJECT_ROOT}/data/query/hypertrophy_imgi10_a53058.jpg ${PROJECT_ROOT}/data/query/fatty_change_imgi9_a54647.jpg ${PROJECT_ROOT}/data/query/inflammation_imgi8_a20304.jpg ${PROJECT_ROOT}/data/query/atrophy_imgi6_a74713.jpg ${PROJECT_ROOT}/data/query/hematopoiesis_imgi6_a71206.jpg"
-)
+# RUN_MODE="seq"
+# BASE_COMMAND="python ${PYTHON_PATH}"
+# GRID_ARGS=(
+#     "--model"
+# )
+# GRID_VALUES=(
+#     "bert roberta"
+# )
 
 # =====================================================
 # Entry point
