@@ -71,6 +71,9 @@ def main() -> None:
     seed: int = config.get("seed", 42)
     features_dir = project_root / config["features_dir"]
     train_sample_size: int = config.get("train_sample_size", 2_000_000)
+    stain_norm_failures_path = config.get("stain_norm_failures_path")
+    if stain_norm_failures_path:
+        stain_norm_failures_path = project_root / stain_norm_failures_path
 
     write_run_metadata(run_dir, exp_name=exp_name, variant_key=variant_key)
 
@@ -78,6 +81,7 @@ def main() -> None:
     logger.info(f"run_dir:      {run_dir}")
     logger.info(f"features_dir: {features_dir}")
     logger.info(f"seed:         {seed}")
+    logger.info(f"stain_norm_failures_path: {stain_norm_failures_path}")
 
     manifest_path = run_dir / "manifest.parquet"
     slide_meta_path = run_dir / "slide_meta.parquet"
@@ -91,9 +95,11 @@ def main() -> None:
         training_sample_path=training_sample_path,
         train_sample_size=train_sample_size,
         seed=seed,
+        stain_norm_failures_path=stain_norm_failures_path,
     )
 
     manifest = pd.read_parquet(manifest_path, columns=["slide_id"])
+    slide_meta = pd.read_parquet(slide_meta_path)
     results = {
         "n_patches": int(len(manifest)),
         "n_slides": int(manifest["slide_id"].nunique()),
@@ -101,6 +107,9 @@ def main() -> None:
         "slide_meta_path": str(slide_meta_path),
         "training_sample_path": str(training_sample_path),
     }
+    if "n_stain_norm_failed" in slide_meta.columns:
+        results["n_stain_norm_failed_excluded"] = int(slide_meta["n_stain_norm_failed"].sum())
+        results["n_patches_raw"] = int(slide_meta["total_patches_raw"].sum())
 
     # ── Save results ──────────────────────────────────────────────────────────
     (run_dir / "results.json").write_text(

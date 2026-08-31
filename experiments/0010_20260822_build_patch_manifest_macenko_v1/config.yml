@@ -18,9 +18,24 @@ seed: 42
 # scripts/select_average_patch.pyで選定済み)を基準にMacenkoで正規化した
 # 新コーパスを使う。エンコーダ(uni_v1)・パッチサイズ(224px)は0001から
 # 変更しない — 変わるのは染色正規化の有無のみ。
-# この再エンベディング自体はこのリポジトリの範囲外(外部で実施)。
-# 出力が届いたら下のfeatures_dirを実際のパスに書き換えること。
+# この再エンベディング自体はこのリポジトリの範囲外(wsi_preprocessパイプライン
+# で実施、torchstain 1.4.1 の NumpyMacenkoNormalizer + デフォルトパラメータ)。
 # (data/trident_processed_macenko は別件のuni_v2・256px・正規化方法不明の
 # コーパスなので流用不可)
-features_dir: "TBD: 外部で作成される uni_v1 + Macenko正規化(基準=data/baseline/63958_x38976_y7616.png)コーパスのfeatures_dirパスに置き換えること"
+#
+# READMEの「クエリ側染色正規化の再検証(2026-08-20)」は染色正規化を非推奨と
+# しているが、そこでの否定的結果はすべて交絡付き(uni_v2はエンコーダ・パッチ
+# サイズも同時に変化、クエリ側torchstain検証は未正規化コーパスに正規化クエリを
+# 当てるパイプライン不一致)。今回は「uni_v1・ジオメトリ完全一致・両側正規化・
+# 自己一致性検証済み」の交絡なし再検証。GT比較(scripts/validate_against_ground_truth.py)
+# でbaseline_v1を上回らなければuni_v2同様に棚上げする。
+features_dir: "data/trident_processed_uni_v1_macenko/20x_224px_0px_overlap/features_uni_v1_macenko"
 train_sample_size: 500000
+
+# wsi_preprocessの監査パス(scripts/audit_stain_norm_failures.py)が出力する
+# stain_norm_failures.json。Macenko正規化に失敗し生パッチのまま埋め込まれた
+# パッチをmanifest・slide_meta・学習サンプルから除外し、コーパスを100%正規化済み
+# にする。全体失敗率が記録された閾値を超えているとbuild_patch_manifestがraiseする。
+# コーパスと一緒に届いたら実際のパスに更新すること。届いていなければコメントアウト可
+# (その場合manifestは生パッチ混入のまま = uni_v2と同じ問題)。
+stain_norm_failures_path: "data/trident_processed_uni_v1_macenko/stain_norm_failures.json"

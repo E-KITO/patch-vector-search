@@ -114,6 +114,37 @@ def load_v2_index(exp_dir: str = "outputs/0005_20260814_build_faiss_index_v2/def
     )
 
 
+def load_v1_macenko_index(
+    exp_dir: str = "outputs/0012_build_faiss_index_macenko_v1/default",
+) -> PatchIndex:
+    """The controlled Macenko comparison: uni_v1 (1024-dim), 224px native patches,
+    identical geometry to load_v1_index's corpus — the ONLY thing changed is that
+    the raw WSIs were Macenko stain-normalized (toward V1_MACENKO_STAIN_REFERENCE,
+    torchstain 1.4.1 NumpyMacenkoNormalizer + default params) before patch
+    extraction, on both the corpus and query side.
+
+    This is the confound-free re-test of the "does stain normalization help
+    retrieval" question. Every earlier negative result had a confound: the uni_v2
+    Macenko corpus also changed encoder + patch size (and, per a wsi_preprocess
+    git-history check, embedded stain-norm-failure patches as raw pixels with no
+    record — a partially-contaminated corpus); the 2026-08-20 query-side torchstain
+    diagnostic normalized queries against an *un-normalized* corpus (pipeline
+    mismatch). See experiments/0010's config.yml. If this does not beat
+    baseline_v1 on the 7-category GT comparison, the line is shelved like uni_v2.
+
+    Built by: experiments/0010 (manifest, with stain_norm_failures.json exclusion)
+    -> a build_faiss_index experiment pointed at that manifest. Pass exp_dir= if
+    that experiment's number differs from the default above.
+    """
+    exp_dir = Path(exp_dir)
+    return PatchIndex.load(
+        index_path=exp_dir / "index.faiss",
+        manifest_path=exp_dir / "manifest.parquet",
+        slide_meta_path=exp_dir / "slide_meta.parquet",
+        features_dir=Path("data/trident_processed_uni_v1_macenko/20x_224px_0px_overlap/features_uni_v1_macenko"),
+    )
+
+
 # The exact reference patch used to Macenko-normalize the raw WSIs behind the uni_v2
 # corpus (confirmed by the user). Must be paired with torchstain's normalizer, not
 # lib.stain_normalize's — see lib/torchstain_normalize.py's docstring: a
@@ -122,6 +153,11 @@ def load_v2_index(exp_dir: str = "outputs/0005_20260814_build_faiss_index_v2/def
 # implementation, vs. ~0.96-0.996 with torchstain (should be ~1.0 for a perfectly
 # reproduced pipeline, and IS ~1.0 for uni_v1 via the same test).
 V2_STAIN_REFERENCE = Path("data/baseline/63958_x38976_y7616.png")
+
+# Same reference patch, used for the controlled uni_v1 Macenko corpus (load_v1_macenko_index).
+# The corpus side (wsi_preprocess) uses torchstain 1.4.1's NumpyMacenkoNormalizer with
+# default params on each 224px patch; this query side must match (numpy backend, defaults).
+V1_MACENKO_STAIN_REFERENCE = Path("data/baseline/63958_x38976_y7616.png")
 
 
 def _embed_v2_normalized(images) -> np.ndarray:
@@ -146,6 +182,30 @@ def _embed_v2_normalized(images) -> np.ndarray:
     return np.concatenate(tiles, axis=0)
 
 
+def _embed_v1_macenko_normalized(images) -> np.ndarray:
+    """Query side of the controlled uni_v1 Macenko comparison: torchstain-normalize
+    each query image toward V1_MACENKO_STAIN_REFERENCE, then plain 224px tiling +
+    uni_v1 encoding.
+
+    Granularity note: this normalizes the *whole* query image once (matching the
+    existing _embed_v2_normalized pattern), whereas the corpus side normalizes
+    each 224px patch independently. torchstain's concentration rescaling is
+    estimated from the whole input, so a query tile's normalization here depends
+    on the whole figure's colour stats rather than just its own. A per-tile
+    variant (tile first, normalize each tile, then embed) would match the corpus
+    granularity more closely — left as a possible refinement to try before
+    trusting the GT numbers. The self-consistency gate (single 224px patch,
+    re-cropped and normalized on its own) validates the per-patch path regardless.
+    """
+    from lib.torchstain_normalize import normalize_to_reference
+
+    tiles = []
+    for f in images:
+        normed = normalize_to_reference(str(f), V1_MACENKO_STAIN_REFERENCE)
+        tiles.append(embed_image_tiles(normed, tile_size=224, encoder_name="uni_v1"))
+    return np.concatenate(tiles, axis=0)
+
+
 def default_pipelines() -> dict[str, tuple[PatchIndex, callable]]:
     """Each pipeline is (PatchIndex, embed_fn(images) -> (n_tiles, dim) array).
     "baseline_v1" (plain tiling, no correction, uni_v1 corpus) is the current
@@ -155,6 +215,10 @@ def default_pipelines() -> dict[str, tuple[PatchIndex, callable]]:
     v2 corpus itself was preprocessed (raw, unnormalized v2 queries scored
     much worse due to this mismatch alone, not because uni_v2 is a worse model
     — see lib/torchstain_normalize.py's docstring).
+    "v1_macenko" is the confound-free stain-normalization re-test: same uni_v1
+    encoder, same 224px geometry as baseline_v1, the ONLY change being Macenko
+    normalization on both corpus and query side (see load_v1_macenko_index).
+    Only appears once experiments/0010 + its build_faiss_index have been run.
     """
     pipelines = {
         "baseline_v1": (
@@ -166,7 +230,11 @@ def default_pipelines() -> dict[str, tuple[PatchIndex, callable]]:
         pipelines["baseline_v2"] = (load_v2_index(), _embed_v2_normalized)
     except (FileNotFoundError, RuntimeError):
         # faiss.read_index raises RuntimeError (not FileNotFoundError) for a missing file.
-        print("NOTE: uni_v2 index not found (run experiments/0004+0005 first) — comparing baseline_v1 only")
+        print("NOTE: uni_v2 index not found (run experiments/0004+0005 first) — skipping baseline_v2")
+    try:
+        pipelines["v1_macenko"] = (load_v1_macenko_index(), _embed_v1_macenko_normalized)
+    except (FileNotFoundError, RuntimeError):
+        print("NOTE: uni_v1 Macenko index not found (run experiments/0010 + its build_faiss_index) — skipping v1_macenko")
     return pipelines
 
 
