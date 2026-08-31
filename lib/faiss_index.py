@@ -89,12 +89,22 @@ def build_faiss_index(
 
     for i, (slide_id, group) in enumerate(manifest.groupby("slide_id", sort=False)):
         group = group.sort_values("local_idx")
+        local_idx = group["local_idx"].to_numpy()
         with h5py.File(features_dir / f"{slide_id}.h5", "r") as f:
-            vectors = f["features"][:].astype(np.float32)
-        if vectors.shape[0] != len(group):
-            raise ValueError(
-                f"{slide_id}: manifest has {len(group)} rows but h5 has {vectors.shape[0]} features"
-            )
+            n_h5 = f["features"].shape[0]
+            if len(group) > n_h5 or (len(local_idx) and local_idx[-1] >= n_h5):
+                raise ValueError(
+                    f"{slide_id}: manifest local_idx out of range for h5 "
+                    f"({len(group)} manifest rows, {n_h5} h5 features)"
+                )
+            # local_idx is the true h5 row index of each kept patch. For the
+            # plain corpus it is range(n_h5) and this is just f["features"][:];
+            # for the Macenko corpus it skips the stain-norm-failure rows that
+            # build_patch_manifest excluded (see its stain_norm_failures_path).
+            if len(group) == n_h5:
+                vectors = f["features"][:].astype(np.float32)
+            else:
+                vectors = f["features"][local_idx].astype(np.float32)
 
         faiss.normalize_L2(vectors)
         ids = group["global_idx"].to_numpy().astype(np.int64)
