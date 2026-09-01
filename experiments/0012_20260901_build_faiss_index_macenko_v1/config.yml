@@ -1,0 +1,31 @@
+# ============================================================
+# Experiment Configuration
+# ============================================================
+# - Fixed hyperparameters go here.
+# - Variable dimensions (model, seed, prompt, ...) go in run_slurm.sh GRID_ARGS.
+# - Do NOT hardcode values you intend to sweep.
+# ============================================================
+
+# --- Hyperparameters ---
+seed: 42
+
+# 交絡なし染色正規化再検証(experiments/0010 の config.yml 参照)のインデックス側。
+# インデックスのハイパーパラメータは 0002(baseline_v1)と完全一致させる —
+# 変わるのはコーパスの染色正規化の有無だけ。
+#
+# features_dir: wsi_preprocess パイプラインが Macenko 正規化した生 WSI から
+#   TRIDENT/uni_v1 で抽出した 224px パッチ特徴量。コーパスが届いたら実パスを
+#   確認すること(リネーム後は features_uni_v1_macenko)。
+features_dir: "data/trident_processed_uni_v1_macenko/20x_224px_0px_overlap/features_uni_v1_macenko"
+# 0010_..._build_patch_manifest_macenko_v1 の出力(project_root相対)。
+# stain_norm_failures.json による除外込みの manifest / slide_meta /
+# training_sample.npy がここにある。
+manifest_exp_dir: "outputs/0010_20260822_build_patch_manifest_macenko_v1/default"
+
+# 以下 4 つは 0002(baseline_v1)と同一値。uni_v1 は 1024 次元、1024/64=16。
+nlist: 4096
+pq_m: 64
+pq_nbits: 8
+# faissのOPQMatrixデフォルト(niter=25)は学習ベクトル数に対しほぼ比例して遅くなる
+# (ローカル検証: n=2000,niter=2で約19秒/シングルスレッド)。10に下げて許容範囲に収める。
+opq_niter: 10

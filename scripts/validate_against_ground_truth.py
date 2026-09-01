@@ -115,7 +115,7 @@ def load_v2_index(exp_dir: str = "outputs/0005_20260814_build_faiss_index_v2/def
 
 
 def load_v1_macenko_index(
-    exp_dir: str = "outputs/0012_build_faiss_index_macenko_v1/default",
+    exp_dir: str = "outputs/0012_20260901_build_faiss_index_macenko_v1/default",
 ) -> PatchIndex:
     """The controlled Macenko comparison: uni_v1 (1024-dim), 224px native patches,
     identical geometry to load_v1_index's corpus — the ONLY thing changed is that
@@ -133,8 +133,9 @@ def load_v1_macenko_index(
     baseline_v1 on the 7-category GT comparison, the line is shelved like uni_v2.
 
     Built by: experiments/0010 (manifest, with stain_norm_failures.json exclusion)
-    -> a build_faiss_index experiment pointed at that manifest. Pass exp_dir= if
-    that experiment's number differs from the default above.
+    -> experiments/0012_20260901_build_faiss_index_macenko_v1 (index, byte-for-byte
+    copy of 0002's hyperparameters). Pass exp_dir= if that experiment's number
+    differs from the default above.
     """
     exp_dir = Path(exp_dir)
     return PatchIndex.load(
