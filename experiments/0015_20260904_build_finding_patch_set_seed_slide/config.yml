@@ -28,12 +28,19 @@ gt_csv: "data/processed_csv/single_finding_liver.csv"
 # その所見の GT スライドのうち seed に回す割合(残りは hold-out で recall 測定用)。
 seed_fraction: 0.5
 # seed スライド 1 枚あたりクエリに使うパッチ数(h5 からランダムサンプル)。
-n_query_patches_per_seed_slide: 400
+# クエリタイル数 = これ × seed スライド数。rerank_pool を深くした分 1 タイルあたりの
+# コストが上がるので、初回の 400 から下げて総タイル数を抑える(信号は十分残る)。
+n_query_patches_per_seed_slide: 200
 
 # --- 検索パラメータ ---
 nprobe: 64
-k_candidate_patches: 5000
-rerank_pool: 1000
+# rerank_pool: search_similar_patches が FAISS から取る近傍数(= 実効的な探索深度)。
+# seed スライドのパッチをクエリにすると最近傍は seed スライド自身のパッチで
+# ほぼ埋まる(自己類似)ため、非 seed スライドまで届かせるには深くする必要がある
+# (0015 初回 rerank_pool=1000 では top-5000 候補中 4890 が seed スライド由来だった)。
+# search_top_slides_multi の k_candidates=8000 に近い深さにする。
+k_candidate_patches: 6000
+rerank_pool: 6000
 max_tiles_reranked: null
 
 # --- productization レイヤー(lib/patch_set.py) ---

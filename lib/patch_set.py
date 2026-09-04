@@ -91,19 +91,28 @@ def build_patch_set(
     exclude_slides: set[str],
     gt_positive_slides: set[str],
     nprobe: int = 64,
-    k_candidate_patches: int = 5000,
-    rerank_pool: int = 1000,
+    k_candidate_patches: int = 8000,
+    rerank_pool: int = 8000,
     max_tiles_reranked: int | None = None,
     sim_floor: float = 0.40,
     nms_radius_patches: float = 1.5,
     max_per_slide: int = 15,
     target_n_patches: int = 150,
+    blank_overfetch: float = 2.0,
 ) -> dict:
     """Search the index with `query_vecs`, curate, crop real patches, and write
     out_dir/{patches/, contact_sheets/, manifest.parquet, manifest.csv}.
 
+    `blank_overfetch`: curate blank_overfetch * target_n_patches candidates, then
+    drop near-blank crops (lib.query_embedding._is_blank_tile) while cropping and
+    keep the first target_n_patches that survive. A whole-slide seed query can
+    include tissue-sparse patches that then match slide background all over the
+    corpus at deceptively high similarity (seen with "Increased mitosis" in
+    experiments/0015) — this is the guard against that leaking into the output.
+
     Returns a stats dict (also suitable to drop into results.json).
     """
+    from lib.query_embedding import _is_blank_tile
     from lib.raw_patch import crop_patch
     from lib.visualize import plot_hit_patch_gallery
 
@@ -128,34 +137,50 @@ def build_patch_set(
         f"{candidates['similarity'].min():.3f}..{candidates['similarity'].max():.3f}"
     )
 
-    final = curate_candidates(
+    curated = curate_candidates(
         candidates, slide_meta,
         sim_floor=sim_floor, nms_radius_patches=nms_radius_patches,
-        max_per_slide=max_per_slide, target_n_patches=target_n_patches,
-    )
-    final["gt_positive_slide"] = final["slide_id"].isin(gt_positive_slides)
-    contributing = sorted(final["slide_id"].unique())
-    gt_contributing = [s for s in contributing if s in gt_positive_slides]
-    logger.info(
-        f"final: {len(final)} patches from {len(contributing)} slides; "
-        f"{len(gt_contributing)} contributing slides are held-out GT-positive; "
-        f"{final['gt_positive_slide'].mean():.2f} of patches from a held-out GT slide"
+        max_per_slide=max_per_slide,
+        target_n_patches=int(round(blank_overfetch * target_n_patches)),
     )
 
+    # Crop in rank order, dropping near-blank crops, until target_n_patches survive.
     rows = []
-    for row in final.itertuples():
+    n_blank_dropped = 0
+    for row in curated.itertuples():
+        if len(rows) >= target_n_patches:
+            break
         psl = int(slide_meta.loc[row.slide_id, "patch_size_level0"])
         patch = crop_patch(row.slide_id, row.coord_x, row.coord_y, raw_slide_dir, psl)
-        fname = f"{row.rank:03d}_{row.slide_id}_x{row.coord_x}_y{row.coord_y}.png"
+        if _is_blank_tile(patch):
+            n_blank_dropped += 1
+            continue
+        rank = len(rows) + 1
+        fname = f"{rank:03d}_{row.slide_id}_x{row.coord_x}_y{row.coord_y}.png"
         patch.save(patches_dir / fname)
         rows.append({
-            "rank": int(row.rank), "slide_id": row.slide_id,
+            "rank": rank, "slide_id": row.slide_id,
             "coord_x": int(row.coord_x), "coord_y": int(row.coord_y),
             "similarity": float(row.similarity),
-            "gt_positive_slide": bool(row.gt_positive_slide),
+            "gt_positive_slide": bool(row.slide_id in gt_positive_slides),
             "patch_file": f"patches/{fname}",
         })
-    manifest = pd.DataFrame(rows)
+    manifest = pd.DataFrame(
+        rows,
+        columns=["rank", "slide_id", "coord_x", "coord_y", "similarity",
+                 "gt_positive_slide", "patch_file"],
+    )
+    final = manifest  # for the contact-sheet grouping and stats below
+
+    contributing = sorted(final["slide_id"].unique()) if len(final) else []
+    gt_contributing = [s for s in contributing if s in gt_positive_slides]
+    frac_gt = round(float(final["gt_positive_slide"].mean()), 3) if len(final) else None
+    logger.info(
+        f"final: {len(final)} patches from {len(contributing)} slides "
+        f"({n_blank_dropped} blank crops dropped); "
+        f"{len(gt_contributing)} contributing slides are held-out GT-positive; "
+        f"frac from held-out GT slide: {frac_gt}"
+    )
     manifest.to_parquet(out_dir / "manifest.parquet", index=False)
     manifest.to_csv(out_dir / "manifest.csv", index=False)
 
@@ -169,6 +194,7 @@ def build_patch_set(
     return {
         "n_raw_candidates": n_raw,
         "n_candidates_after_exclude": int(len(candidates)),
+        "n_blank_crops_dropped": n_blank_dropped,
         "n_final_patches": int(len(final)),
         "n_contributing_slides": len(contributing),
         "n_contributing_slides_heldout_gt": len(gt_contributing),
