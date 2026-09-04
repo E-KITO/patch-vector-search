@@ -28,10 +28,13 @@ def spatial_nms(df: pd.DataFrame, patch_size_level0: int, radius_patches: float)
     radius_patches * patch_size_level0 (Euclidean, level-0 pixels) — those are
     the same bit of tissue seen by adjacent overlapping tile searches.
     """
-    radius_sq = (radius_patches * patch_size_level0) ** 2
+    radius_sq = float(radius_patches * patch_size_level0) ** 2
     kept_xy: list[tuple[int, int]] = []
     keep_mask = []
+    # int() so the squared level-0 coordinates (can be ~1e10) use Python's
+    # arbitrary-precision ints, not numpy int32 which overflows.
     for x, y in zip(df["coord_x"].to_numpy(), df["coord_y"].to_numpy()):
+        x, y = int(x), int(y)
         ok = all((x - kx) ** 2 + (y - ky) ** 2 >= radius_sq for kx, ky in kept_xy)
         keep_mask.append(ok)
         if ok:
@@ -184,12 +187,15 @@ def build_patch_set(
     manifest.to_parquet(out_dir / "manifest.parquet", index=False)
     manifest.to_csv(out_dir / "manifest.csv", index=False)
 
+    import matplotlib.pyplot as plt
+
     for sid, g in final.groupby("slide_id", sort=False):
         fig = plot_hit_patch_gallery(
             g.sort_values("similarity", ascending=False), raw_slide_dir, slide_meta
         )
         tag = "gt" if sid in gt_positive_slides else "nogt"
         fig.savefig(sheets_dir / f"{sid}__{tag}.png", dpi=120, bbox_inches="tight")
+        plt.close(fig)  # 150 contributing slides = 150 figures otherwise held open
 
     return {
         "n_raw_candidates": n_raw,
