@@ -115,7 +115,7 @@ def embed_image(
             queries with a real domain gap (textbook/atlas scans) but can
             badly hurt an already-in-distribution query (a real same-corpus-
             style patch) — e.g. a cellular-infiltration query that ranked
-            all 7 ground-truth slides in the top 66/998 raw dropped to 0/7
+            all 7 ground-truth slides in the top 66/1000 raw dropped to 0/7
             found at all once stain-normalized. Not a safe default; compare
             raw vs. normalized per query rather than always applying it.
         resize_mode: How to fit `image` into the encoder's native 224x224

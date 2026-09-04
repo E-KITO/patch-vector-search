@@ -12,7 +12,7 @@ for the full comparison table this script produced).
 Ground truth: data/processed_csv/single_finding_liver.csv (slide_id ->
 FINDING_TYPE for slides with one confirmed pathology). For each configured
 NTP-atlas category, this maps to a FINDING_TYPE, computes the full
-model-similarity ranking of all 998 corpus slides via
+model-similarity ranking of every slide in that pipeline's corpus via
 PatchIndex.search_top_slides_multi, and reports the best/mean rank and count
 of the confirmed ground-truth slides within that ranking. Lower rank is
 better; found=n_gt means every ground-truth slide had at least one candidate
@@ -57,7 +57,7 @@ ATLAS_DIR = Path("data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Prog
 GT_CSV = Path("data/processed_csv/single_finding_liver.csv")
 
 # NTP atlas category directory -> confirmed ground-truth FINDING_TYPE.
-# Only categories with >=1 ground-truth slide inside the 998-slide corpus are
+# Only categories with >=1 ground-truth slide inside the corpus are
 # useful here — most atlas categories have zero (a known corpus limitation,
 # see patch-vector-search-project memory), so this list is intentionally
 # short rather than all 25 atlas categories.
@@ -132,10 +132,12 @@ def load_v1_macenko_index(
     mismatch). See experiments/0010's config.yml. If this does not beat
     baseline_v1 on the 7-category GT comparison, the line is shelved like uni_v2.
 
-    Built by: experiments/0010 (manifest, with stain_norm_failures.json exclusion)
-    -> experiments/0012_20260901_build_faiss_index_macenko_v1 (index, byte-for-byte
-    copy of 0002's hyperparameters). Pass exp_dir= if that experiment's number
-    differs from the default above.
+    Built by: experiments/0010 (manifest; stain_norm_failures exclusion disabled —
+    the wsi_preprocess sample audit found the Macenko failures are ~0.8% and
+    background-only, so raw-passthrough of those patches is harmless, see 0010's
+    config.yml) -> experiments/0012_20260901_build_faiss_index_macenko_v1 (index,
+    byte-for-byte copy of 0002's hyperparameters). Pass exp_dir= if that
+    experiment's number differs from the default above.
     """
     exp_dir = Path(exp_dir)
     return PatchIndex.load(
@@ -290,7 +292,15 @@ def run_comparison(
             row[f"{name}_n_gt"] = len(gt_slides)
 
             tiles = embed_fn(images)
-            ranked = pi.search_top_slides_multi(tiles, k_candidates=8000, nprobe=nprobe, top_n_slides=998)
+            # Rank every slide in this pipeline's corpus — the literal 998 this
+            # used to hard-code was a stale mid-Aug snapshot of the uni_v1
+            # feature count (the built corpus is 1000; see git blame). With a
+            # smaller cap the lowest-ranked slides never receive a rank, which
+            # skews mean_rank and makes baseline_v1 vs a differently-sized
+            # corpus (e.g. the Macenko rebuild) not strictly comparable.
+            ranked = pi.search_top_slides_multi(
+                tiles, k_candidates=8000, nprobe=nprobe, top_n_slides=len(corpus_slide_ids)
+            )
             s = rank_stats(ranked, gt_slides)
             row[f"{name}_found"] = s["found"]
             row[f"{name}_best"] = s["best_rank"]

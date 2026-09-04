@@ -36,6 +36,22 @@ train_sample_size: 500000
 # stain_norm_failures.json。Macenko正規化に失敗し生パッチのまま埋め込まれた
 # パッチをmanifest・slide_meta・学習サンプルから除外し、コーパスを100%正規化済み
 # にする。全体失敗率が記録された閾値を超えているとbuild_patch_manifestがraiseする。
-# コーパスと一緒に届いたら実際のパスに更新すること。届いていなければコメントアウト可
-# (その場合manifestは生パッチ混入のまま = uni_v2と同じ問題)。
-stain_norm_failures_path: "data/trident_processed_uni_v1_macenko/stain_norm_failures.json"
+#
+# 2026-09-04: wsi_preprocess側の判断により、1000スライドのフル監査と
+# フルstain_norm_failures.jsonは生成しない。サンプル監査(32/1000スライド、seed 0)
+# の結果:
+#   - 推定・全体失敗率 0.81%(閾値1%未満)、スライド処理失敗 0
+#   - 失敗パッチ4800件の mean OD 内訳: background 99.9% / sparse 0.1% / tissue 0.0%
+#   - 失敗はすべて実質白背景。脂肪変性・壊死など探索対象の所見領域にはゼロ。
+# よって混在する約0.8%の素通しパッチは純粋背景で、tissueクエリの検索に実害なし。
+# stain_norm_failures.sample.json は32スライドしかカバーせず全コーパスに一貫適用
+# できないため manifest には渡さない(uni_v2の「半汚染」問題とは異なり、こちらは
+# 素通し分が背景限定であることを監査で確認済み)。
+# 参照用診断成果物: data/trident_processed_uni_v1_macenko/stain_norm_failures.sample.json
+#   および同 stain_norm_failure_inspect/(failure_patches.csv, montage_by_od.png, overlay/)
+#
+# 値なし(= None)にして除外処理を無効化する。experiment.py は
+# config.get("stain_norm_failures_path") が falsy なら stain_norm_failures_path
+# を渡さず、manifest は連続 local_idx のまま構築される。キー自体は
+# preflight_check.py の config/experiment.py 整合チェックのため残す。
+stain_norm_failures_path:

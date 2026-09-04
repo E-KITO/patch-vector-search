@@ -39,8 +39,8 @@ Ground truth比較(`scripts/validate_against_ground_truth.py`)のクエリ画像
   カテゴリ(例: Kupffer細胞増殖 best_rank=124、封入体 best_rank=14〜297)は、モデルや
   検索アルゴリズムの限界だけでなく、クエリ画像に占める「所見と無関係なタイル」の割合が
   高いことも一因である可能性が高い。
-- Ground truthとしている所見自体(`data/processed_csv/single_finding_liver.csv`)は998スライド
-  コーパスの一部にしか対応しない。NNLの26カテゴリのうち、998スライドコーパス内に
+- Ground truthとしている所見自体(`data/processed_csv/single_finding_liver.csv`)は1000スライド
+  コーパスの一部にしか対応しない。NNLの26カテゴリのうち、1000スライドコーパス内に
   確定ラベル付きスライドが1件でもあるのは7カテゴリのみ(Hypertrophy/Necrosis/
   Increased mitosis/Glycogen/Hematopoiesis/Kupffer細胞増殖/封入体)。残り19カテゴリ
   (Fatty Change, Focus, Inflammationなど)は検証不能。
@@ -71,7 +71,7 @@ Ground truth比較(`scripts/validate_against_ground_truth.py`)のクエリ画像
 ```
 [① manifest構築]                [② FAISSインデックス構築]
 lib/manifest.py           →    lib/faiss_index.py
-998個のh5を走査し                OPQ+IVF+PQ(コサイン類似度=
+1000個のh5を走査し               OPQ+IVF+PQ(コサイン類似度=
 manifest/slide_meta/             正規化ベクトルのinner product)
 学習サンプルを作成                を学習・構築。圧縮後 数GB程度
 (experiments/0001)               (experiments/0002)
@@ -167,7 +167,7 @@ top_slides = patch_index.search_top_slides_multi(query_vecs, top_n_slides=20)  #
 
 ## ディレクトリ構成(このプロジェクト固有)
 
-- `lib/manifest.py` — 998スライドを走査し、manifest/slide_meta/学習サンプルを構築
+- `lib/manifest.py` — 1000スライドを走査し、manifest/slide_meta/学習サンプルを構築
 - `lib/faiss_index.py` — OPQ+IVF+PQインデックスの学習・構築
 - `lib/query_embedding.py` — 任意画像→UNI埋め込み(タイル分割・倍率補正・染色正規化オプション)
 - `lib/search.py` — `PatchIndex`: 類似パッチ検索・WSI逆引き
@@ -214,7 +214,11 @@ torchstainでMacenko正規化済みの生WSIから抽出)という別コーパ�
 > 割合の記録は無い。下記の結論(v1優位、PQ/IVF調査)はエンコーダ・パッチサイズの
 > 交絡に加え、この半汚染コーパス上で測られていた。結論を覆すほどの影響ではないが
 > 記録として。新しい`v1_macenko`コーパス(experiments/0010)はこの問題を避けている
-> (numpyバックエンド、失敗パッチはmanifestから除外し失敗率をゲート)。
+> (numpyバックエンド、失敗率をサンプル監査で把握)。2026-09-04時点の
+> サンプル監査(32/1000スライド)では失敗率0.81%・失敗パッチは全て実質白背景
+> (tissue 0.0%)だったため、フル監査とmanifest行除外は行わず素通しのまま進める
+> 方針(uni_v2の「割合不明の半汚染」とは異なり素通し分が背景限定と確認済み)。
+> 詳細は`experiments/0010_..._build_patch_manifest_macenko_v1/config.yml`のコメント参照。
 
 1. 最初にground truth比較したところ7カテゴリ中6カテゴリでv1に劣ったが、原因は
    モデル性能ではなく、クエリ側の染色正規化がコーパス側(`torchstain`ライブラリ使用)と
@@ -394,7 +398,7 @@ NNLアトラスのNecrosis画像(`imgi_11`、壊死巣が左35〜40%、残りは
 造血細胞塊あり)でも同様に、矢印が指す細胞塊のタイルより、何の変哲もない正常組織タイルの
 方が近似スコアが高かった。
 
-考えられる理由: コーパス(998〜1000スライド)には「ごく普通の正常肝組織」のパッチが
+考えられる理由: コーパス(1000スライド)には「ごく普通の正常肝組織」のパッチが
 圧倒的多数あるため、正常組織を写したタイルは近似top-1スコアが高く出やすい(似た正常組織
 パッチがコーパス中に大量にあるので、既定の`nprobe=32`で探索する32クラスタのどこかに
 必ず極めて近い候補が見つかる)。一方、壊死巣のような比較的珍しいパターンは、本当に強い
