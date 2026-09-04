@@ -22,6 +22,7 @@ spaces, different dimensionality):
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -184,6 +185,7 @@ def embed_image_tiles(
     native_tile_size: int | None = None,
     stride: int | None = None,
     stain_reference: str | Path | Image.Image | None = None,
+    tile_transform: Callable[[Image.Image], Image.Image] | None = None,
 ) -> np.ndarray:
     """Split a large reference image into a grid of crops and embed each one,
     instead of committing to a single crop.
@@ -224,6 +226,13 @@ def embed_image_tiles(
             against before tiling (see embed_image's docstring for the same
             caveat: helps domain-shifted queries but can hurt already
             in-distribution ones — not a safe default).
+        tile_transform: Optional per-tile image->image callback applied to
+            each surviving (non-blank) crop after it is resized to tile_size
+            and before it is converted to a tensor. Unlike stain_reference
+            (which normalizes the whole image once, before tiling), this runs
+            per tile — use it when the corpus you're matching applied a
+            per-patch transform (e.g. per-224px-patch Macenko normalization)
+            and you need the query tiles processed at the same granularity.
 
     Returns:
         (n_tiles, dim) float32 array, each row L2-normalized, where dim depends on
@@ -267,6 +276,9 @@ def embed_image_tiles(
         crops = non_blank
     if crop_size != tile_size:
         crops = [c.resize((tile_size, tile_size), Image.LANCZOS) for c in crops]
+
+    if tile_transform is not None:
+        crops = [tile_transform(c) for c in crops]
 
     tiles = [to_tensor(c) for c in crops]
     batch = torch.stack(tiles).to(device=device, dtype=dtype)

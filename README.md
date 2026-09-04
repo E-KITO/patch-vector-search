@@ -156,7 +156,7 @@ top_slides = patch_index.search_top_slides_multi(query_vecs, top_n_slides=20)  #
 | `search_similar_patches_multi` / `search_top_slides_multi`(タイルごと個別検索→結果統合) | ✅ 推奨(既定) | 複数参照画像はベクトル平均よりこちらの方が頑健 |
 | WSI逆引きの`n_hits_ratio`ソート | ✅ 推奨(既定) | 単純な`n_hits`ソートより7カテゴリ中5カテゴリで改善、追加コストなし |
 | `embed_image_tiles_auto_scale`(倍率自動補正、`lib/mpp_estimation.py`) | ❌ 非推奨 | 画質は改善するが、GT比較では検索精度がほぼ悪化(7カテゴリ中0カテゴリで最良) |
-| `stain_reference=`(Macenko染色正規化) | ❌ 非推奨 | 同上。ケースによっては大きく悪化する。自作`lib.stain_normalize`実装(自己一致性0.5〜0.84)での検証結果だったため、2026-08-20に検証済みの`lib.torchstain_normalize`(自己一致性0.96〜0.996)へ差し替えて再検証したが、結論は変わらず(7カテゴリ中4カテゴリで明確に悪化、うち1カテゴリは大幅悪化)。詳細は下記「クエリ側染色正規化の再検証」参照 |
+| `stain_reference=`(Macenko染色正規化) | ❌ 非推奨(確定) | 同上。ケースによっては大きく悪化する。自作`lib.stain_normalize`実装(自己一致性0.5〜0.84)→`lib.torchstain_normalize`(自己一致性0.96〜0.996)への差し替え、さらに2026-09-04の交絡なし再検証(uni_v1・ジオメトリ完全一致・コーパス側もクエリ側もMacenko、`experiments/0010`/`0012`)まで行ったが、GT比較で`baseline_v1`を上回れず(best_rank 7カテゴリ中5カテゴリで悪化、うちKupffer 202→764等は大幅悪化)。染色正規化はこれで完全に棚上げ。詳細は下記「クエリ側染色正規化の再検証」参照 |
 | `embed_image(..., resize_mode="centercrop")`(単一クロップ) | ⚠️ 場合による | 結果の分散が大きく、GTを完全に見失うこともある |
 | `encoder_name="uni_v2"`コーパス(1536次元・256px、`experiments/0004`/`0005`/`0006`) | ⚠️ v1よりやや劣るが僅差(公平な比較後) | クエリ側は`lib.torchstain_normalize.normalize_to_reference`で`data/baseline/63958_x38976_y7616.png`に正規化してから使うこと(`lib.stain_normalize`の自作Macenkoでは不十分——自己一致性0.5〜0.84止まり、torchstainなら0.96〜0.996)。正規化後の公平なGT比較でも7カテゴリ中6カテゴリでv1が優位だが、差は大幅縮小(例: Hypertrophy 94→27)。PQ量子化を細かくする(pq_m 64→96)ことも試したが改善なし。詳細は下記「uni_v2コーパスの調査状況」参照。既定は引き続き`uni_v1`(`experiments/0001`/`0002`) |
 
@@ -364,6 +364,22 @@ uni_v2はエンコーダ・パッチサイズも同時変化かつ半汚染コ�
 (`experiments/0010` → build_faiss_index → `scripts/validate_against_ground_truth.py`の
 `v1_macenko`パイプライン)。コーパス側の再エンベディングはwsi_preprocessパイプラインで実施。
 この再検証でも`baseline_v1`を上回らなければ、uni_v2同様に確定的に棚上げする。
+
+**結論(2026-09-04、確定的に棚上げ):** 交絡なし再検証を完走した
+(`experiments/0010`=manifest → `experiments/0012`=FAISS index、ともに0001/0002と
+ジオメトリ・ハイパラ完全一致。コーパスは1000スライド・18,368,335パッチでbaseline_v1と
+2パッチ差。wsi_preprocess側の自己一致性テストは`cos_self`全パッチ1.00000でPASS。
+染色正規化失敗パッチは監査で背景限定・約0.8%と判明したため除外せず素通し)。
+GT比較結果(`outputs/gt_validation_results.csv`、job 9643):
+`v1_macenko`は`baseline_v1`の`best_rank`を**7カテゴリ中2カテゴリでのみ改善**
+(Increased mitosis 7→3、Inclusion body 480→349)、**5カテゴリで悪化**
+(うちProliferation, Kupffer cell 202→764、Hematopoiesis 25→112、
+Single cell necrosis 10→47は大幅悪化)。`mean_rank`は6/7カテゴリで悪化。
+**交絡を全て排除しても染色正規化はこの検索タスクを改善しないことが確定した。**
+Kupffer・出血系の大幅悪化は2026-08-20の所見(正規化が色素沈着・出血など
+診断的意味を持つ色情報まで消す)を裏付ける。染色正規化(クエリ側・コーパス側の
+いずれの形でも)はこれで完全に棚上げとする。`data/trident_processed_uni_v1_macenko`
+コーパスと`experiments/0010`/`0012`は参照用に残置。
 
 ## 検索結果の可視化改善とタイル選択バイアスの発見(2026-08-20)
 

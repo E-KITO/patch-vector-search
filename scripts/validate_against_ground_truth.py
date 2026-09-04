@@ -49,6 +49,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import numpy as np
 import pandas as pd
+from PIL import Image
 
 from lib.query_embedding import embed_image_tiles
 from lib.search import PatchIndex
@@ -186,26 +187,41 @@ def _embed_v2_normalized(images) -> np.ndarray:
 
 
 def _embed_v1_macenko_normalized(images) -> np.ndarray:
-    """Query side of the controlled uni_v1 Macenko comparison: torchstain-normalize
-    each query image toward V1_MACENKO_STAIN_REFERENCE, then plain 224px tiling +
-    uni_v1 encoding.
+    """Query side of the controlled uni_v1 Macenko comparison: tile each query
+    image into 224px crops, Macenko-normalize *each tile independently* toward
+    V1_MACENKO_STAIN_REFERENCE, then uni_v1-encode.
 
-    Granularity note: this normalizes the *whole* query image once (matching the
-    existing _embed_v2_normalized pattern), whereas the corpus side normalizes
-    each 224px patch independently. torchstain's concentration rescaling is
-    estimated from the whole input, so a query tile's normalization here depends
-    on the whole figure's colour stats rather than just its own. A per-tile
-    variant (tile first, normalize each tile, then embed) would match the corpus
-    granularity more closely — left as a possible refinement to try before
-    trusting the GT numbers. The self-consistency gate (single 224px patch,
-    re-cropped and normalized on its own) validates the per-patch path regardless.
+    Granularity: this matches the corpus side, which normalizes each 224px patch
+    on its own (wsi_preprocess: crop 224px patch -> torchstain NumpyMacenkoNormalizer
+    with default params -> encoder; validated by the job-9559 self-consistency
+    test, cos_self == 1.0). An earlier version of this function normalized the
+    *whole* atlas figure once and then tiled — torchstain estimates the stain
+    vectors and the concentration-rescaling factor from the whole input, so with
+    a full figure (white margins, arrow ink, labels, mixed-magnification tissue)
+    each query tile got a different colour transform than the matching corpus
+    patch did. That whole-image run (job 9643) had v1_macenko losing to
+    baseline_v1 on 5/7 categories; this per-tile version removes that last
+    query/corpus pipeline mismatch.
+
+    Degenerate tiles (near-blank crops where Macenko stain estimation fails) are
+    passed through unnormalized, mirroring the corpus side, where the audit found
+    the ~0.8% stain-norm failures were background-only and were embedded raw.
     """
     from lib.torchstain_normalize import normalize_to_reference
 
+    def _norm_tile(tile: Image.Image) -> Image.Image:
+        try:
+            return normalize_to_reference(tile, V1_MACENKO_STAIN_REFERENCE)
+        except Exception:
+            return tile
+
     tiles = []
     for f in images:
-        normed = normalize_to_reference(str(f), V1_MACENKO_STAIN_REFERENCE)
-        tiles.append(embed_image_tiles(normed, tile_size=224, encoder_name="uni_v1"))
+        tiles.append(
+            embed_image_tiles(
+                str(f), tile_size=224, encoder_name="uni_v1", tile_transform=_norm_tile
+            )
+        )
     return np.concatenate(tiles, axis=0)
 
 
