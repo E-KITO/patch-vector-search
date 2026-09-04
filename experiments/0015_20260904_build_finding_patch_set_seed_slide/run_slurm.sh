@@ -33,22 +33,24 @@ USE_LOCAL_SSD_OUTPUT=1
 PYTHON_PATH="${PROJECT_ROOT}/experiments/${EXP_NAME}/experiment.py"
 
 # =====================================================
-# Seq run: 0014 と同じ2所見(自己検索診断でコーパスがよく表現できる)。
-# 0015 は seed を NNL アトラス図版ではなくその所見の GT スライドにする。
-# experiment.py の SUPPORTED_FINDINGS を参照。
+# Seq run: spatial_nms オーバーフロー修正後の再実行。
+#   glycogen@deliver   — 9675 で validate 成立済み。全 GT スライドを seed に
+#                        未ラベルスライドから代表パッチ集を作る(病理レビュー用)。
+#   Hypertrophy@validate — 未検証。seed/hold-out で retrieval+curation が効くか測る。
+# experiment.py の SUPPORTED_FINDINGS / MODES を参照。
 # =====================================================
 
 RUN_MODE="seq"
 BASE_COMMAND="python ${PYTHON_PATH} --config config.yml"
 GRID_ARGS=(
-    "--finding"
+    "--task"
 )
 GRID_VALUES=(
-    "Deposit,_glycogen Increased_mitosis"
+    "Deposit,_glycogen@deliver Hypertrophy@validate"
 )
 
-# GRID_VALUES はスペース区切りで seq に展開される。所見名にスペースがあると
-# 壊れるので、experiment.py 側で "_" を " " に戻して受け取る(下記 argparse 参照)。
+# GRID_VALUES はスペース区切りで seq に展開される。所見名のスペースは "_" で書き、
+# experiment.py 側で "_"→" " に戻す。"@" 以降がモード(下記 argparse 参照)。
 
 # =====================================================
 # Entry point

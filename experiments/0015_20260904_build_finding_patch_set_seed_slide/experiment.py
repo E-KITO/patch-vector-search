@@ -14,10 +14,18 @@ import pandas as pd
 
 
 # Findings the 2026-09-04 self-retrieval diagnostic showed the corpus
-# represents well enough to seed from. Keep this list conservative — the point
-# of 0015 is to test the curation pipeline on a seed that is known to work, not
-# to re-litigate which findings retrieve.
-SUPPORTED_FINDINGS = ("Deposit, glycogen", "Increased mitosis")
+# represents well enough to seed from, and that are whole-patch-texture (not
+# sub-patch focal — see README "所見の2クラス分け"; "Increased mitosis" is the
+# counter-example and was dropped after job 9675). Keep this list conservative.
+SUPPORTED_FINDINGS = ("Deposit, glycogen", "Hypertrophy")
+
+# validate: split the finding's GT slides seed/hold-out, exclude only the seed
+#   slides, and mark hold-out GT slides so the gt_positive fraction reads as
+#   recall — for a finding whose seed->retrieval leg is not yet proven.
+# deliver: seed from all the finding's GT slides, exclude all of them, and
+#   output the patches discovered in *unlabelled* slides — the actual
+#   representative-patch set, for a finding already validated.
+MODES = ("validate", "deliver")
 
 
 def _get_project_root() -> Path:
@@ -52,19 +60,19 @@ def load_config(exp_dir: Path) -> dict:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Build a representative-patch set for one finding, seeding the "
-        "query from that finding's confirmed TG-GATEs slides (not NNL atlas figures). "
-        "GT slides are split seed/hold-out; the seed slides' patch vectors are the "
-        "query, seed slides are excluded from results, and the gt_positive flag "
-        "marks hold-out GT slides so it reads as recall."
+        "query from that finding's confirmed TG-GATEs slides (not NNL atlas figures)."
     )
     parser.add_argument("--config", type=str, default="config.yml")
     parser.add_argument(
-        "--finding", required=True,
-        help="FINDING_TYPE (spaces may be written as '_'). One of: "
-        f"{sorted(SUPPORTED_FINDINGS)}",
+        "--task", required=True,
+        help="'<FINDING_TYPE>@<mode>', e.g. 'Deposit,_glycogen@deliver' or "
+        f"'Hypertrophy@validate'. Spaces in the finding may be written as '_'. "
+        f"Findings: {sorted(SUPPORTED_FINDINGS)}. Modes: {list(MODES)}.",
     )
     args = parser.parse_args()
-    args.finding = args.finding.replace("_", " ")
+    finding, _, mode = args.task.partition("@")
+    args.finding = finding.replace("_", " ")
+    args.mode = mode
     return args
 
 
@@ -108,10 +116,13 @@ def main() -> None:
     config = load_config(Path(__file__).parent)
 
     if args.finding not in SUPPORTED_FINDINGS:
-        raise SystemExit(f"--finding {args.finding!r} not in {sorted(SUPPORTED_FINDINGS)}")
+        raise SystemExit(f"finding {args.finding!r} not in {sorted(SUPPORTED_FINDINGS)}")
+    if args.mode not in MODES:
+        raise SystemExit(f"mode {args.mode!r} not in {list(MODES)} (task='<finding>@<mode>')")
 
     finding_slug = slugify(args.finding)
-    run_dir = get_run_dir(project_root, __file__, finding_slug, output_root=output_root)
+    variant_key = f"{finding_slug}__{args.mode}"
+    run_dir = get_run_dir(project_root, __file__, variant_key, output_root=output_root)
     logger = setup_logger(run_dir, exp_name)
 
     seed = int(config.get("seed", 42))
@@ -120,17 +131,21 @@ def main() -> None:
     raw_slide_dir = project_root / config["raw_slide_dir"]
     gt_csv = project_root / config["gt_csv"]
     seed_fraction = float(config.get("seed_fraction", 0.5))
-    n_query_patches_per_seed_slide = int(config.get("n_query_patches_per_seed_slide", 400))
+    max_seed_slides = int(config.get("max_seed_slides", 6))
+    n_query_patches_per_seed_slide = int(config.get("n_query_patches_per_seed_slide", 120))
     nprobe = int(config.get("nprobe", 64))
     k_candidate_patches = int(config.get("k_candidate_patches", 5000))
-    rerank_pool = int(config.get("rerank_pool", 1000))
+    rerank_pool = int(config.get("rerank_pool", 5000))
     max_tiles_reranked = config.get("max_tiles_reranked", None)
-    sim_floor = float(config.get("sim_floor", 0.40))
+    sim_floor = float(config.get("sim_floor", 0.65))
     nms_radius_patches = float(config.get("nms_radius_patches", 1.5))
     max_per_slide = int(config.get("max_per_slide", 15))
     target_n_patches = int(config.get("target_n_patches", 150))
 
-    write_run_metadata(run_dir, exp_name=exp_name, variant_key=finding_slug, finding=args.finding)
+    write_run_metadata(
+        run_dir, exp_name=exp_name, variant_key=variant_key,
+        finding=args.finding, mode=args.mode,
+    )
 
     rng = np.random.default_rng(seed)
 
@@ -149,31 +164,47 @@ def main() -> None:
     )
     if len(finding_slides) < 2:
         raise SystemExit(
-            f"{args.finding!r} has only {len(finding_slides)} corpus slide(s) — cannot split seed/hold-out"
+            f"{args.finding!r} has only {len(finding_slides)} corpus slide(s)"
         )
 
+    # Seed / hold-out split depends on mode.
     perm = rng.permutation(len(finding_slides))
-    n_seed = max(1, min(len(finding_slides) - 1, round(seed_fraction * len(finding_slides))))
-    seed_slides = sorted(finding_slides[i] for i in perm[:n_seed])
-    holdout_slides = sorted(finding_slides[i] for i in perm[n_seed:])
+    if args.mode == "deliver":
+        # Seed from (a sample of) all the finding's GT slides; exclude every GT
+        # slide so the output is patches discovered in unlabelled slides.
+        seed_pool = [finding_slides[i] for i in perm]
+        holdout_slides: list[str] = []
+        exclude_slides = set(finding_slides)
+        gt_positive_slides: set[str] = set()
+    else:  # validate
+        n_seed = max(1, min(len(finding_slides) - 1, round(seed_fraction * len(finding_slides))))
+        seed_pool = [finding_slides[i] for i in perm[:n_seed]]
+        holdout_slides = sorted(finding_slides[i] for i in perm[n_seed:])
+        exclude_slides = set(seed_pool)  # narrowed to the sampled seed below
+        gt_positive_slides = set(holdout_slides)
 
-    logger.info(f"Starting: {exp_name} / {finding_slug}")
+    seed_slides = sorted(seed_pool[:max_seed_slides])
+    if args.mode == "validate":
+        exclude_slides = set(seed_slides)
+
+    logger.info(f"Starting: {exp_name} / {variant_key}  (mode={args.mode})")
     logger.info(f"finding:        {args.finding}")
     logger.info(f"corpus GT slides ({len(finding_slides)}): {finding_slides}")
-    logger.info(f"seed slides ({len(seed_slides)}):    {seed_slides}")
+    logger.info(f"seed slides ({len(seed_slides)}, capped at {max_seed_slides}): {seed_slides}")
     logger.info(f"hold-out slides ({len(holdout_slides)}): {holdout_slides}")
+    logger.info(f"excluding {len(exclude_slides)} slide(s) from results")
 
     query_vecs = load_slide_query_vecs(
         features_dir, seed_slides, n_query_patches_per_seed_slide, rng
     )
     logger.info(f"query vectors from seed slides: {query_vecs.shape[0]}")
 
-    out_dir = run_dir / finding_slug
+    out_dir = run_dir / variant_key
     stats = build_patch_set(
         pi, query_vecs,
         out_dir=out_dir, raw_slide_dir=raw_slide_dir,
-        exclude_slides=set(seed_slides),
-        gt_positive_slides=set(holdout_slides),
+        exclude_slides=exclude_slides,
+        gt_positive_slides=gt_positive_slides,
         nprobe=nprobe, k_candidate_patches=k_candidate_patches,
         rerank_pool=rerank_pool, max_tiles_reranked=max_tiles_reranked,
         sim_floor=sim_floor, nms_radius_patches=nms_radius_patches,
@@ -182,13 +213,14 @@ def main() -> None:
 
     results = {
         "finding": args.finding,
+        "mode": args.mode,
         "corpus_gt_slides": finding_slides,
         "seed_slides": seed_slides,
         "holdout_slides": holdout_slides,
         "n_query_vectors": int(query_vecs.shape[0]),
         **stats,
         "params": {
-            "seed": seed, "seed_fraction": seed_fraction,
+            "seed": seed, "seed_fraction": seed_fraction, "max_seed_slides": max_seed_slides,
             "n_query_patches_per_seed_slide": n_query_patches_per_seed_slide,
             "nprobe": nprobe, "k_candidate_patches": k_candidate_patches,
             "rerank_pool": rerank_pool, "max_tiles_reranked": max_tiles_reranked,
