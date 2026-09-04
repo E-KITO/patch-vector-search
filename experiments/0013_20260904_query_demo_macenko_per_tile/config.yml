@@ -1,0 +1,69 @@
+# ============================================================
+# Experiment Configuration
+# ============================================================
+# - Fixed hyperparameters go here.
+# - Variable dimensions (model, seed, prompt, ...) go in run_slurm.sh GRID_ARGS.
+# - Do NOT hardcode values you intend to sweep.
+# ============================================================
+
+# --- Hyperparameters ---
+seed: 42
+#
+# 2026-09-04: experiments/0009 と同じ可視化(実解像度パッチギャラリー・クエリタイル
+# 近似スコアヒートマップ)を、染色正規化した uni_v1 Macenko コーパス
+# (experiments/0010 -> 0012)に対して、per-tile Macenko 正規化したクエリで実行する。
+# GT 比較(scripts/validate_against_ground_truth.py の v1_macenko)は best_rank でしか
+# 評価しておらず、返ってくるパッチが実際に所見の見た目をしているか・0009 で見つかった
+# タイル選択バイアス(局所所見の診断タイルが近似スコア競争で正常組織タイルに負け、
+# 一度も厳密再ランキングされない)が Macenko 下でどう変わるかは見ていない。それを
+# 目視するための実験。0009 の出力(baseline_v1・plain query、同じクエリ5枚)と
+# 直接横並び比較できるよう、探索パラメータは 0009 と完全一致にしてある。
+#
+# 0012_..._build_faiss_index_macenko_v1 の出力
+# (index.faiss/manifest.parquet/slide_meta.parquet を含む)
+index_exp_dir: "outputs/0012_20260901_build_faiss_index_macenko_v1/default"
+features_dir: "data/trident_processed_uni_v1_macenko/20x_224px_0px_overlap/features_uni_v1_macenko"
+thumbnails_dir: "data/trident_processed_uni_v1_macenko/thumbnails"
+# lib.raw_patch.crop_patch source dir for lib.visualize.plot_hit_patch_gallery.
+# 生 WSI の実解像度ピクセル(染色正規化なし)。ギャラリーは組織形態を目視確認する
+# ためのものなので、正規化前の本来の見た目を出す。全 1000 スライドをカバー。
+raw_slide_dir: "data/moo_collected_tggate_wsi/raw_wsi"
+# per-tile Macenko 正規化のターゲットパッチ(コーパス側と同じ。
+# scripts/validate_against_ground_truth.py の V1_MACENKO_STAIN_REFERENCE と同一)。
+# 指定すると各クエリタイルを個別に torchstain NumpyMacenkoNormalizer で正規化して
+# から埋め込む(コーパス側の 224px パッチごと正規化と粒度一致)。
+stain_reference_per_tile: "data/baseline/63958_x38976_y7616.png"
+# lib.mpp_estimation.build_scale_reference_centroids output (see
+# lib.mpp_estimation.save_scale_centroids); only loaded if --auto_scale is
+# passed. NOT RECOMMENDED: a 7-category ground-truth comparison found this
+# (with or without --stain_reference) was never the single best option, and
+# combining both was usually worse than either alone or plain tiling with no
+# correction at all — see lib/query_embedding.py's
+# embed_image_tiles_auto_scale docstring for the full comparison table. Kept
+# available and off by default for cases someone wants to re-evaluate it.
+scale_centroids_path: "data/scale_centroids.npz"
+tile_size: 224
+
+# --- Search parameters ---
+k: 20
+nprobe: 32
+rerank_pool: 200
+# How many of a query image's tiles (ranked by cheap approximate FAISS
+# score) get the expensive exact-rerank pass — see
+# lib.search.PatchIndex.search_similar_patches_multi. Was 4; raised to 12
+# after finding that with only 4 slots, a couple of spuriously-high-scoring
+# background tiles could dominate every slot and produce an all-background
+# result (see lib.query_embedding._is_blank_tile, which now filters obvious
+# blank tiles out before this ranking — this margin is extra robustness on
+# top of that, not a replacement for it).
+#
+# 2026-08-22: set to null (no limit, every tile exact-reranked) — the tile
+# score heatmap (lib.visualize.plot_query_tile_scores) showed that even 12
+# slots weren't enough for focal findings like Extramedullary hematopoiesis:
+# the diagnostic tile never won a slot against far more common "ordinary
+# tissue" tiles on the cheap approximate score, so it never got the chance
+# to be exact-reranked at all. Not yet validated against ground truth.
+max_tiles_reranked: null
+k_candidates: 8000
+top_n_slides: 20
+top_n_slides_to_plot: 3
