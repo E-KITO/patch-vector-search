@@ -698,17 +698,38 @@ job 9701 の hypertrophy validate では、`experiment.py` の seed 分割が ho
 実際には検索は GT スライド **4枚(27479, 28782, 35346, 35376)** を回収できていたが、
 `results.json` には hold-out GT 1/13 としか記録されていない。commit `041b66e` で
 hold-out を `finding_slides - seed_slides`(seed に使わなかった GT スライド全部)から
-導出するよう修正した。`seed_slides` の決まり方と `rng` の消費順序は変えていないので、
-**再実行しても検索結果は job 9701 と同一で、指標だけが 4/19 に変わる**。job 9932 で再実行
-(結果は追記予定)。glycogen validate(GT 6枚で上限が効かない)と deliver モードは影響を
-受けない。
+導出するよう修正し、**job 9932 で再実行して検証した**。
 
-なおこの 4/19 という数字は、GT 25枚 / コーパス約1000枚に対して 49スライド中 4枚なので
-chance(期待値約1.2枚)の3倍強にとどまる。glycogen validate(43スライド中 hold-out GT 2枚
-≒ chance の15倍)ほど鮮明ではなく、**hypertrophy が glycogen と同じ意味で「機能した」とは
-まだ言えない**。ただし hypertrophy は肝細胞肥大というありふれた所見で、非GT寄与スライド
-45枚に未ラベル陽性が多く含まれている可能性が高く、GT ラベルだけでは判定しきれない。
-コンタクトシートの目視レビューが必要。
+`seed_slides` の決まり方と `rng` の消費順序は変えていないため、**検索結果は job 9701 と
+完全に同一**である(150枚の manifest を `rank, slide_id, coord_x, coord_y, similarity,
+patch_file` で突き合わせて一致を確認済み。変わったのは `gt_positive_slide` が True の
+パッチ数 1 → 25 だけ)。指標は以下のとおり修正された:
+
+| | job 9701(バグあり) | job 9932(修正後) |
+|---|---|---|
+| hold-out スライド数 | 13 | 19 |
+| hold-out GT 寄与スライド | 1 | **4** |
+| hold-out GT 由来パッチの割合 | 0.007 | **0.167** |
+
+glycogen validate(GT 6枚で上限が効かない)と deliver モードは影響を受けない。
+job 9701 の出力は `outputs/.../hypertrophy__validate__9701_holdout_bug/` に退避してある
+(`lib/output_utils.py` の重複実行ガードを解除するため、再実行前にリネームが必要)。
+
+### hypertrophy は「機能した」と言えるか(2026-09-05 時点では保留)
+
+chance と比べれば有意ではある。seed 6枚を除いたコーパス994枚のうち hold-out GT は19枚
+なので、49スライドを引いて GT が期待値 0.94枚のところ **4枚**(約4.3倍)、パッチ割合でも
+chance 1.9% に対し **16.7%**(約8.7倍)。
+
+しかし glycogen validate と比べると弱い。glycogen は hold-out GT **3枚中2枚(67%)** を
+回収し chance 比で約15倍だったのに対し、hypertrophy は **19枚中4枚(21%)** にとどまる。
+**glycogen と同じ意味で「機能した」とは言えず、判定は保留**とする。
+
+ただし hypertrophy(肝細胞肥大)は TG-GATEs で極めてありふれた所見であり、非GT寄与
+スライド45枚に未ラベルの陽性が多く含まれている可能性が高い。`single_finding_liver.csv`
+は「確定単一所見」のスライドしか拾わないため、GT ラベルだけでは実際の精度の上限が
+測れない。コンタクトシート(`contact_sheets/<slide_id>__{gt,nogt}.png`、49枚)の目視
+レビューが判定に必要。
 
 ### 所見の2クラス分け(0014 + 0015 で見えた実データの構造)
 
@@ -722,9 +743,10 @@ chance(期待値約1.2枚)の3倍強にとどまる。glycogen validate(43スラ
 1. **glycogen deliver の137枚(job 9701)を病理知識のある人にレビューしてもらう** —
    採用率・多様性・所見レンジのカバー。GT スライドを全除外して未ラベルスライドだけから
    組んだ集合なので、「本当にグリコーゲン沈着か」がそのまま成果物の妥当性になる
-2. **hypertrophy を「機能する」と言ってよいか判定する** — job 9932 の修正後 recall(4/19 の
-   見込み)と、49寄与スライドのコンタクトシート目視の両方で。chance の3倍強という数字は
-   glycogen ほど明確ではない
+2. **hypertrophy のコンタクトシート49枚を目視レビューする** — job 9932 で recall は
+   4/19(パッチ割合 16.7%、chance 比 8.7倍)と確定したが、glycogen(3枚中2枚)ほど明確
+   ではなく判定は保留中。hypertrophy はありふれた所見なので非GT寄与スライド45枚に未ラベル
+   陽性が紛れている可能性が高く、GT ラベルだけでは上限が測れない
 3. whole-patch テクスチャ系の残り(fatty change, ground glass)で 0015 を回す
 4. **deliver モードの候補枯れ対策** — glycogen deliver は候補 174 で target 150 に届かず
    137枚止まりだった。他の所見に展開するなら `k_candidate_patches` を上げる必要がある
