@@ -30,10 +30,16 @@ raw_slide_dir: "data/moo_collected_tggate_wsi/raw_wsi"
 gt_csv: "data/processed_csv/single_finding_liver.csv"
 
 # --- seed 構成 ---
-# validate モードで seed に回す GT スライドの割合(残りは hold-out)。
+# validate モードで seed に回す GT スライドの割合。
 seed_fraction: 0.5
 # 実際に seed に使う GT スライド数の上限。seed スライドが多い所見(Hypertrophy は
-# GT 25枚)でクエリタイル数が膨らむのを抑える。
+# GT 25枚)でクエリタイル数が膨らむのを抑える。seed_fraction とこの上限のどちらが
+# 効いても、**seed に使わなかった GT スライドは全て hold-out** になる
+# (validate モードの recall 分母)。
+# なお、この上限はコスト制御だけでなく候補プールの品質にも効く: 検索候補は
+# 全クエリ統合後の top-k_candidate_patches という固定窓で、seed スライドの除外は
+# その後に効くため、seed を増やすほど自己類似パッチが窓を埋めて非 seed 候補が
+# 減る(job 9701 Hypertrophy: seed 6枚で 5000 → 367)。安易に緩めないこと。
 max_seed_slides: 6
 # seed スライド 1 枚あたりクエリに使うパッチ数(h5 からランダムサンプル)。
 # クエリタイル数 = これ × min(seed スライド数, max_seed_slides)。

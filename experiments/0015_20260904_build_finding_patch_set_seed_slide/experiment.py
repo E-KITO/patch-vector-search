@@ -179,13 +179,19 @@ def main() -> None:
     else:  # validate
         n_seed = max(1, min(len(finding_slides) - 1, round(seed_fraction * len(finding_slides))))
         seed_pool = [finding_slides[i] for i in perm[:n_seed]]
-        holdout_slides = sorted(finding_slides[i] for i in perm[n_seed:])
-        exclude_slides = set(seed_pool)  # narrowed to the sampled seed below
-        gt_positive_slides = set(holdout_slides)
 
     seed_slides = sorted(seed_pool[:max_seed_slides])
     if args.mode == "validate":
+        # Hold-out is *every* GT slide not actually seeded, so it stays the
+        # complement of seed_slides no matter which of seed_fraction /
+        # max_seed_slides binds. Deriving it from seed_pool instead left the
+        # slides that max_seed_slides trimmed off in neither set: not queried,
+        # not excluded, and not flagged gt_positive, so patches retrieved from
+        # them scored as non-GT and recall read low (job 9701 Hypertrophy
+        # retrieved 4 GT slides but counted 1).
+        holdout_slides = sorted(set(finding_slides) - set(seed_slides))
         exclude_slides = set(seed_slides)
+        gt_positive_slides = set(holdout_slides)
 
     logger.info(f"Starting: {exp_name} / {variant_key}  (mode={args.mode})")
     logger.info(f"finding:        {args.finding}")
