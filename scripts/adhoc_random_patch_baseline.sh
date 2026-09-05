@@ -11,25 +11,46 @@
 # ランダム対照を作る。「検索がその所見を選別できている」のか「このコーパスの
 # 肝パッチなら大体こう見える」だけなのかを切り分けるための診断。
 # 索引もエンコーダも使わず、manifest からランダムサンプルして openslide で
-# 実解像度クロップするだけなので GPU 不要・CPU のみ。150枚程度なら数分。
-#
-# 既定は Hypertrophy(job 9932)。--exclude-slides にはその run の seed スライドを
-# 渡している(結果から除外されていた側と母集団を揃えるため)。
+# 実解像度クロップするだけなので GPU 不要・CPU のみ。150枚で数分。
 
 set -euo pipefail
 
 PROJECT_ROOT="/workspace/filesrv02/kito/patch-vector-search"
 
-PATCH_SET="${PATCH_SET:-outputs/0015_20260904_build_finding_patch_set_seed_slide/hypertrophy__validate/hypertrophy__validate}"
-OUT_DIR="${OUT_DIR:-outputs/random_patch_baseline/hypertrophy}"
-EXCLUDE_SLIDES="${EXCLUDE_SLIDES:-27537,28741,35367,35374,40637,44299}"
+# =====================================================
+# 対象パッチ集: "<name>|<patch_set_dir>|<exclude_slides>"
+#
+# exclude_slides にはその run の seed スライドを渡す(検索結果から除外されて
+# いた側と、ランダム対照の母集団を揃えるため)。validate モードなら seed
+# スライド、deliver モードなら GT スライド全体。
+#
+# 対象を変えるときはここを書き換えてコミットしてから投入すること
+# (実行設定を git に残すため。環境変数で外から差し替えない)。
+#
+# 実行済み:
+#   hypertrophy (job 9937) — キュレート150枚とランダム150枚を目視で区別できず。
+#     詳細は README「ランダム対照による検証」参照。
+#     "hypertrophy|outputs/0015_20260904_build_finding_patch_set_seed_slide/hypertrophy__validate/hypertrophy__validate|27537,28741,35367,35374,40637,44299"
+# =====================================================
 
-RUN_CMD="python scripts/random_patch_baseline.py \
-    --patch-set ${PATCH_SET} \
-    --out ${OUT_DIR} \
-    --exclude-slides ${EXCLUDE_SLIDES}"
+TARGETS=(
+    # glycogen は 0015 で唯一「機能する」と判定された所見。hypertrophy が
+    # 本当に不成立なのか、それとも目視判定自体が使えないのかを切り分ける
+    # ポジティブコントロールとして回す。
+    "glycogen|outputs/0015_20260904_build_finding_patch_set_seed_slide/deposit_glycogen__deliver/deposit_glycogen__deliver|49244,49372,52799,53036,53267,58070"
+)
 
-echo "Running scripts/random_patch_baseline.py on $(hostname) ..."
+RUN_CMDS=""
+for target in "${TARGETS[@]}"; do
+    IFS='|' read -r NAME PATCH_SET EXCLUDE_SLIDES <<< "${target}"
+    RUN_CMDS+="echo '--- ${NAME} ---'"$'\n'
+    RUN_CMDS+="python scripts/random_patch_baseline.py"
+    RUN_CMDS+=" --patch-set ${PATCH_SET}"
+    RUN_CMDS+=" --out outputs/random_patch_baseline/${NAME}"
+    RUN_CMDS+=" --exclude-slides ${EXCLUDE_SLIDES}"$'\n'
+done
+
+echo "Running scripts/random_patch_baseline.py on $(hostname) for ${#TARGETS[@]} target(s) ..."
 
 if command -v apptainer &>/dev/null && [ -n "${SIF_PATH:-}" ] && [ -f "${SIF_PATH}" ]; then
     apptainer exec \
@@ -38,13 +59,13 @@ if command -v apptainer &>/dev/null && [ -n "${SIF_PATH:-}" ] && [ -f "${SIF_PAT
             set -euo pipefail
             source ${PROJECT_ROOT}/.venv/bin/activate
             cd ${PROJECT_ROOT}
-            ${RUN_CMD}
+            ${RUN_CMDS}
         "
 else
     echo "⚠️ Apptainer not found or SIF_PATH not set. Running on host system."
     source "${PROJECT_ROOT}/.venv/bin/activate"
     cd "${PROJECT_ROOT}"
-    ${RUN_CMD}
+    eval "${RUN_CMDS}"
 fi
 
-echo "Done. Review ${OUT_DIR}/blind_sheets/ before opening ${OUT_DIR}/blind_key.csv"
+echo "Done. Review outputs/random_patch_baseline/*/blind_sheets/ before opening blind_key.csv"
