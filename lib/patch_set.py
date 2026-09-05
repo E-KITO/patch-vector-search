@@ -66,12 +66,23 @@ def curate_candidates(
     nms_radius_patches: float,
     max_per_slide: int,
     target_n_patches: int,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, dict]:
     """candidates: DataFrame[slide_id, coord_x, coord_y, similarity] (string
     slide_id). slide_meta: indexed by string slide_id, has patch_size_level0.
-    Returns the final set with an added integer `rank` column.
+
+    Returns (final set with an added integer `rank` column, per-stage counts).
+
+    The counts matter for diagnosis: a run that falls short of its target can
+    do so because the similarity floor cut it, because per-slide NMS collapsed
+    near-duplicate hits, because few slides contributed at all, or because
+    blank crops were dropped downstream — and those mean very different things.
+    experiments/0014's inline version logged each stage; that was lost when the
+    logic moved here, leaving only "candidates in, patches out" (see README
+    "最終パッチ数が少ないことの意味").
     """
+    n_in = len(candidates)
     kept = candidates[candidates["similarity"] >= sim_floor].copy()
+    n_after_sim_floor = len(kept)
 
     frames = []
     for sid, g in kept.groupby("slide_id", sort=False):
@@ -79,10 +90,27 @@ def curate_candidates(
         psl = int(slide_meta.loc[sid, "patch_size_level0"])
         frames.append(spatial_nms(g, psl, nms_radius_patches).head(max_per_slide))
     kept = pd.concat(frames, ignore_index=True) if frames else kept.iloc[:0]
+    n_after_nms_and_cap = len(kept)
+    n_slides_after_nms = int(kept["slide_id"].nunique()) if len(kept) else 0
+    n_slides_at_cap = (
+        int((kept.groupby("slide_id").size() >= max_per_slide).sum()) if len(kept) else 0
+    )
 
     final = slide_diverse_truncate(kept, target_n_patches).reset_index(drop=True)
     final["rank"] = np.arange(1, len(final) + 1)
-    return final
+
+    stats = {
+        "n_candidates_in": n_in,
+        "n_after_sim_floor": n_after_sim_floor,
+        "n_after_nms_and_cap": n_after_nms_and_cap,
+        "n_slides_after_nms": n_slides_after_nms,
+        # Slides that hit max_per_slide. Many slides at the cap means the set is
+        # limited by the cap (deepening the search would add more); none at the
+        # cap means it is limited by how few good patches exist per slide.
+        "n_slides_at_max_per_slide": n_slides_at_cap,
+        "n_after_round_robin": len(final),
+    }
+    return final, stats
 
 
 def build_patch_set(
@@ -140,11 +168,19 @@ def build_patch_set(
         f"{candidates['similarity'].min():.3f}..{candidates['similarity'].max():.3f}"
     )
 
-    curated = curate_candidates(
+    curated, curate_stats = curate_candidates(
         candidates, slide_meta,
         sim_floor=sim_floor, nms_radius_patches=nms_radius_patches,
         max_per_slide=max_per_slide,
         target_n_patches=int(round(blank_overfetch * target_n_patches)),
+    )
+    logger.info(
+        f"curation: {curate_stats['n_candidates_in']} -> "
+        f"{curate_stats['n_after_sim_floor']} after sim_floor {sim_floor} -> "
+        f"{curate_stats['n_after_nms_and_cap']} after NMS + cap {max_per_slide} "
+        f"({curate_stats['n_slides_after_nms']} slides, "
+        f"{curate_stats['n_slides_at_max_per_slide']} at the cap) -> "
+        f"{curate_stats['n_after_round_robin']} after round-robin"
     )
 
     # Crop in rank order, dropping near-blank crops, until target_n_patches survive.
@@ -200,6 +236,7 @@ def build_patch_set(
     return {
         "n_raw_candidates": n_raw,
         "n_candidates_after_exclude": int(len(candidates)),
+        **curate_stats,
         "n_blank_crops_dropped": n_blank_dropped,
         "n_final_patches": int(len(final)),
         "n_contributing_slides": len(contributing),

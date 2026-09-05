@@ -72,6 +72,16 @@ def parse_args() -> argparse.Namespace:
         help="Comma-separated slide_ids to exclude from sampling — pass the run's "
         "seed slides, which were excluded from its results too.",
     )
+    p.add_argument(
+        "--only-slides", type=str, default="",
+        help="Comma-separated slide_ids to sample *from*, instead of the whole "
+        "corpus. Use this to inspect what a run's seed slides actually contain: "
+        "the printed blank-rejection count then measures how much of the seed is "
+        "tissue-sparse, which is the suspected cause when a run's own candidates "
+        "come back mostly blank (see 'Degeneration, granular, eosinophilic', "
+        "job 9962: 48 of 69 crops blank). Not a control set — do not read the "
+        "resulting sheets as one.",
+    )
     p.add_argument("--per-page", type=int, default=50, help="Patches per blind sheet.")
     p.add_argument("--seed", type=int, default=DEFAULT_SEED)
     return p.parse_args()
@@ -84,13 +94,19 @@ def sample_random_patches(
     exclude_slides: set[str],
     rng: np.random.Generator,
     out_dir: Path,
+    only_slides: set[str] | None = None,
 ) -> pd.DataFrame:
     """Uniformly sample patches from the corpus, crop them, drop blank crops,
-    and keep the first `n` that survive."""
+    and keep the first `n` that survive. `only_slides` narrows the population
+    to those slides (see --only-slides)."""
     from lib.query_embedding import _is_blank_tile
     from lib.raw_patch import crop_patch
 
     pool = manifest[~manifest["slide_id"].isin(exclude_slides)]
+    if only_slides:
+        pool = pool[pool["slide_id"].isin(only_slides)]
+        if pool.empty:
+            raise SystemExit(f"no corpus patches for --only-slides {sorted(only_slides)}")
     n_draw = min(len(pool), int(round(BLANK_OVERFETCH * n)))
     drawn = pool.iloc[np.sort(rng.choice(len(pool), size=n_draw, replace=False))]
 
@@ -114,7 +130,11 @@ def sample_random_patches(
             "patch_path": str(out_dir / fname),
         })
 
-    print(f"random control: drew {n_draw}, dropped {n_blank} blank, kept {len(rows)}")
+    blank_pct = 100.0 * n_blank / n_draw if n_draw else 0.0
+    print(
+        f"random control: drew {n_draw}, dropped {n_blank} blank ({blank_pct:.0f}%), "
+        f"kept {len(rows)}"
+    )
     if len(rows) < n:
         print(f"WARNING: only {len(rows)} of {n} requested — raise BLANK_OVERFETCH")
     return pd.DataFrame(rows)
@@ -167,9 +187,14 @@ def main() -> None:
     print(f"curated set: {len(curated)} patches from {curated['slide_id'].nunique()} slides")
     print(f"corpus: {len(manifest)} patches, excluding {len(exclude_slides)} slide(s)")
 
+    only_slides = {s.strip() for s in args.only_slides.split(",") if s.strip()}
+    if only_slides:
+        print(f"sampling only from {len(only_slides)} slide(s): {sorted(only_slides)}")
+
     args.out.mkdir(parents=True, exist_ok=True)
     random_df = sample_random_patches(
-        manifest, slide_meta, n, exclude_slides, rng, args.out / "random_patches"
+        manifest, slide_meta, n, exclude_slides, rng, args.out / "random_patches",
+        only_slides=only_slides,
     )
 
     curated_entries = pd.DataFrame({
@@ -198,6 +223,7 @@ def main() -> None:
         "n_pages": n_pages,
         "per_page": args.per_page,
         "excluded_slides": sorted(exclude_slides),
+        "only_slides": sorted(only_slides),
         "seed": args.seed,
         "curated_slides": int(curated["slide_id"].nunique()),
         "random_slides": int(random_df["slide_id"].nunique()) if len(random_df) else 0,
