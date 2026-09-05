@@ -1,0 +1,47 @@
+# ============================================================
+# Experiment Configuration
+# ============================================================
+# 0014: 1所見の NNL アトラス代表図版をクエリに、TG-GATEs コーパスから
+# その所見の「代表パッチ集」を実際に組み立てる(トラック1: 成果物を一度
+# end-to-end で作る)。検索コアは experiments/0009 等と同じ PatchIndex だが、
+# その上に productization レイヤー(類似度しきい値・スライド内空間NMS・
+# スライドあたり上限・由来スライドでのラウンドロビン絞り込み・実解像度
+# パッチのファイル保存・manifest・コンタクトシート)を載せる。
+# 詳細は README「今後の方針 / トラック1」。
+# ============================================================
+
+# --- Hyperparameters ---
+seed: 42
+
+# 0002_..._build_faiss_index の出力(既定の推奨インデックス、uni_v1)
+index_exp_dir: "outputs/0002_20260808_build_faiss_index/default"
+features_dir: "data/trident_processed/20x_224px_0px_overlap/features_uni_v1"
+# lib.raw_patch.crop_patch のソース(実解像度 WSI ピクセル、全 1000 スライド)
+raw_slide_dir: "data/moo_collected_tggate_wsi/raw_wsi"
+# NNL アトラス図版のルート(所見サブディレクトリを含む)
+atlas_root: "data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver"
+# patch 単位の粗い precision チェック用(所見を持つスライドの一覧)
+gt_csv: "data/processed_csv/single_finding_liver.csv"
+
+tile_size: 224
+
+# --- 検索パラメータ(experiments/0009 に合わせる) ---
+nprobe: 64
+# search_similar_patches_multi の候補パッチ数(フィルタ前の生プール)
+k_candidate_patches: 5000
+rerank_pool: 1000
+# null = 全参照タイルを厳密再ランキング(experiments/0009/0011 と同じ。
+# タイル選択バイアスを避ける)
+max_tiles_reranked: null
+
+# --- productization レイヤーのパラメータ ---
+# 類似度の下限。これ未満の候補は捨てる(壊死クロップが sim=0.33 のゴミを
+# 返した事例を踏まえたガード)。初回実行の分布を見て調整する。
+sim_floor: 0.40
+# スライド内空間 NMS の半径(そのスライドの patch_size_level0 の倍数)。
+# 採用済みパッチからこの距離以内の同一スライドのパッチは「同じ組織」として捨てる。
+nms_radius_patches: 1.5
+# 1スライドあたりの採用上限(1スライドが集合を占有しないように)
+max_per_slide: 15
+# 最終的な代表パッチ集の目標枚数。由来スライドでラウンドロビンして絞る。
+target_n_patches: 150

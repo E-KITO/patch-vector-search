@@ -123,6 +123,7 @@ def plot_query_tile_scores(
     nprobe: int = 32,
     max_tiles_reranked: int | None = None,
     device: str | None = None,
+    tile_transform=None,
 ) -> plt.Figure:
     """Overlay every grid tile of a query image with its approximate FAISS
     top-1 score, as a heatmap.
@@ -161,6 +162,12 @@ def plot_query_tile_scores(
             ones search_similar_patches_multi would actually exact-rerank)
             get a red outline.
         device: "cuda"/"cpu" for the UNI forward pass.
+        tile_transform: optional per-tile image->image callback, applied to
+            each scored crop after resize-to-tile_size and before the UNI
+            forward pass. Must be the same transform passed to the
+            embed_image_tiles call the real search used (e.g. per-tile
+            Macenko normalization), or the scores shown here won't match
+            what was actually searched.
 
     Returns:
         matplotlib Figure: the query image with a semi-transparent
@@ -204,6 +211,9 @@ def plot_query_tile_scores(
     scored_crops = [c for c, b in zip(crops, blank) if not b]
     if crop_size != tile_size:
         scored_crops = [c.resize((tile_size, tile_size), Image.LANCZOS) for c in scored_crops]
+
+    if tile_transform is not None:
+        scored_crops = [tile_transform(c) for c in scored_crops]
 
     to_tensor = transforms.Compose([
         transforms.ToTensor(),

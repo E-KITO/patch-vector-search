@@ -1,0 +1,60 @@
+# ============================================================
+# Experiment Configuration
+# ============================================================
+# 0015: 0014 の変種。0014 は NNL アトラス図版をクエリにしたが、GT スライドを
+# ほとんど引けなかった(アトラス→TG-GATEs のドメインギャップが #1 ブロッカーと
+# 判明)。0015 は **自己検索で動くと分かっている側**を seed にする。
+#
+# その所見の確定単一所見スライド(single_finding_liver.csv ∩ コーパス)から
+# パッチ特徴量を h5 で直読み(UNI エンコーダ不使用)してクエリにし、curation
+# パイプライン(lib/patch_set.py)で代表パッチ集に落とす。--task '<finding>@<mode>':
+#
+#   validate: GT スライドを seed / hold-out に分割し seed のみ除外。
+#     gt_positive フラグが hold-out GT スライドにつく(= recall の指標)。
+#     seed→retrieval が未検証の所見向け。
+#   deliver: GT スライド全体を seed にして全て除外。出力は未ラベルスライドから
+#     発見したパッチ = 本来の成果物。検証済みの所見向け。
+#
+# 2026-09-04: job 9675(rerank_pool=1000→6000)で glycogen は validate 成立
+# (hold-out GT 2/3 回収)、mitosis は sub-patch シグナルで不成立と判明。
+# この設定は lib/patch_set.py の spatial_nms オーバーフロー修正(commit 4d04aff)
+# 後の再実行用: glycogen=deliver、hypertrophy=validate。
+# ============================================================
+
+# --- Hyperparameters ---
+seed: 42
+
+index_exp_dir: "outputs/0002_20260808_build_faiss_index/default"
+features_dir: "data/trident_processed/20x_224px_0px_overlap/features_uni_v1"
+raw_slide_dir: "data/moo_collected_tggate_wsi/raw_wsi"
+gt_csv: "data/processed_csv/single_finding_liver.csv"
+
+# --- seed 構成 ---
+# validate モードで seed に回す GT スライドの割合(残りは hold-out)。
+seed_fraction: 0.5
+# 実際に seed に使う GT スライド数の上限。seed スライドが多い所見(Hypertrophy は
+# GT 25枚)でクエリタイル数が膨らむのを抑える。
+max_seed_slides: 6
+# seed スライド 1 枚あたりクエリに使うパッチ数(h5 からランダムサンプル)。
+# クエリタイル数 = これ × min(seed スライド数, max_seed_slides)。
+n_query_patches_per_seed_slide: 120
+
+# --- 検索パラメータ ---
+nprobe: 64
+# rerank_pool: search_similar_patches が FAISS から取る近傍数(= 実効的な探索深度)。
+# seed スライドのパッチをクエリにすると最近傍は seed スライド自身のパッチで
+# ほぼ埋まる(自己類似)ため、非 seed スライドまで届かせるには深くする必要がある
+# (rerank_pool=1000 では top 候補の 98% が seed 由来だった)。9675 は 6000 で
+# 重かった(mitosis 24分)ので 5000 に。glycogen の非seed候補は 689→~550 見込みで
+# target 150 には十分。
+k_candidate_patches: 5000
+rerank_pool: 5000
+max_tiles_reranked: null
+
+# --- productization レイヤー(lib/patch_set.py) ---
+# 類似度の下限。壊死クロップが sim=0.33 のゴミを返した事例のガード。
+# glycogen は全候補 0.92+ なので実質無影響、コーパスとの一致が弱い所見で効く。
+sim_floor: 0.65
+nms_radius_patches: 1.5
+max_per_slide: 15
+target_n_patches: 150

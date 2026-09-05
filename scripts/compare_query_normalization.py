@@ -72,8 +72,12 @@ def main():
         norm_vec = embed_image(image_path, stain_reference=STAIN_REFERENCE)
         print("cosine sim between raw and normalized query embeddings:", float(raw_vec @ norm_vec))
 
-        raw_top = patch_index.search_top_slides(raw_vec, k_candidates=8000, nprobe=64, top_n_slides=998)
-        norm_top = patch_index.search_top_slides(norm_vec, k_candidates=8000, nprobe=64, top_n_slides=998)
+        raw_top = patch_index.search_top_slides(
+            raw_vec, k_candidates=8000, nprobe=64, top_n_slides=len(corpus_ids)
+        )
+        norm_top = patch_index.search_top_slides(
+            norm_vec, k_candidates=8000, nprobe=64, top_n_slides=len(corpus_ids)
+        )
 
         overlap = len(set(raw_top["slide_id"].head(20)) & set(norm_top["slide_id"].head(20)))
         print(f"top-20 slide overlap (raw vs normalized): {overlap}/20")
@@ -82,7 +86,7 @@ def main():
             rank_report(raw_top, gt_slides, "raw")
             rank_report(norm_top, gt_slides, "normalized")
         else:
-            print("  no ground-truth slides for this finding inside the 998-slide corpus "
+            print("  no ground-truth slides for this finding inside the corpus "
                   "(known limitation, see patch-vector-search-project memory) — "
                   "reporting embedding/top-slide shift only.")
 

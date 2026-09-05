@@ -12,7 +12,7 @@
 # (adhoc_validate_against_ground_truth.sh と同等の資源設定)。
 # コーパス側(v1インデックス・h5特徴量)は一切再構築しない — クエリ画像の
 # 埋め込み直前にtorchstainベースのMacenko正規化を適用するだけなので、
-# 既存の998〜1000枚のコーパス埋め込みには触れない。
+# 既存の1000枚のコーパス埋め込みには触れない。
 
 set -euo pipefail
 

@@ -1,0 +1,8 @@
+exp_id: 0015
+exp_name: 0015_20260904_build_finding_patch_set_seed_slide
+created_date: 20260904
+git_commit: 1d7291f4146b879bc0310496d0de3d48336b0d6e
+resumed_from_exp: 0014_20260904_build_finding_patch_set
+resume_checkpoint_dir: /workspace/filesrv02/kito/patch-vector-search/outputs/0014_20260904_build_finding_patch_set
+resume_checkpoint_file: null
+
