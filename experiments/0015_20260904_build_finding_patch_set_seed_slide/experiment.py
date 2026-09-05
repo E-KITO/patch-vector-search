@@ -14,10 +14,25 @@ import pandas as pd
 
 
 # Findings the 2026-09-04 self-retrieval diagnostic showed the corpus
-# represents well enough to seed from, and that are whole-patch-texture (not
-# sub-patch focal — see README "所見の2クラス分け"; "Increased mitosis" is the
-# counter-example and was dropped after job 9675). Keep this list conservative.
-SUPPORTED_FINDINGS = ("Deposit, glycogen", "Hypertrophy")
+# represents well enough to seed from, AND that are whole-patch texture — the
+# one class of the three in README "所見の3クラス分け" that patch-level
+# retrieval can serve. Keep this list conservative: a finding earns its place
+# by a random-control check (scripts/random_patch_baseline.py), not by looking
+# like it should work.
+#
+# Dropped after being disproven:
+#   "Increased mitosis" — sub-patch signal; a mitotic figure does not change
+#     how a 224px patch looks (job 9675).
+#   "Hypertrophy" — a *relative* judgement ("larger than normal") with no
+#     reference tissue inside a 224px crop. Its GT recall looked passable
+#     (4/19, 8.7x chance) but a blind random control could not tell its patch
+#     set from uniformly sampled liver (job 9937: 59% vs a 61% baseline, while
+#     glycogen scored 91% under the same judge). Not reachable by deeper search.
+SUPPORTED_FINDINGS = (
+    "Deposit, glycogen",
+    "Ground glass appearance",
+    "Degeneration, granular, eosinophilic",
+)
 
 # validate: split the finding's GT slides seed/hold-out, exclude only the seed
 #   slides, and mark hold-out GT slides so the gt_positive fraction reads as

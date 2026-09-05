@@ -15,10 +15,16 @@
 #   deliver: GT スライド全体を seed にして全て除外。出力は未ラベルスライドから
 #     発見したパッチ = 本来の成果物。検証済みの所見向け。
 #
-# 2026-09-04: job 9675(rerank_pool=1000→6000)で glycogen は validate 成立
-# (hold-out GT 2/3 回収)、mitosis は sub-patch シグナルで不成立と判明。
-# この設定は lib/patch_set.py の spatial_nms オーバーフロー修正(commit 4d04aff)
-# 後の再実行用: glycogen=deliver、hypertrophy=validate。
+# 実行履歴:
+#   9675 — glycogen は validate 成立(hold-out GT 2/3)、mitosis は sub-patch
+#          シグナルで不成立。rerank_pool 1000→6000。
+#   9701 — glycogen@deliver(137枚/30スライド)+ Hypertrophy@validate。
+#   9932 — Hypertrophy@validate 再実行(hold-out 分割バグ修正後、recall 4/19)。
+#   9937/9943 — ランダム対照(scripts/random_patch_baseline.py)。glycogen は
+#          判定精度91%で選別が効いていることを確認、**hypertrophy は59%で
+#          chance 以下 = 不成立**と確定。GT recall だけでは判定を誤る。
+#   次回 — Ground glass appearance / Degeneration, granular, eosinophilic を
+#          deliver で。実行後に必ずランダム対照を取ること。
 # ============================================================
 
 # --- Hyperparameters ---
