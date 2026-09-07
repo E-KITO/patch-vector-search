@@ -56,6 +56,26 @@ PRE_NATIVE_COMMAND='
   export PVS_INDEX_DIR="${_S}/index"
   export PVS_FEATURES_DIR="${_S}/features"
   export PVS_THUMBNAILS_DIR="${_S}/thumbnails"
+  # Galleries are the only raw-WSI reader, and only for the top top_n_slides_to_plot
+  # slides per finding. A prior --no-galleries sweep already wrote top_slides.csv
+  # for every finding, so stage exactly those .svs (union ~34 slides / ~20G) and
+  # the galleries run entirely off local NVMe. If no prior CSVs exist the var is
+  # left unset and experiment.py falls back to reading WSI from NFS.
+  _ids=$(for f in "${PROJECT_ROOT}"/outputs/0013_20260904_query_demo_macenko_per_tile/query__*Nonneoplastic_Lesion_Atlas__pertilenorm/top_slides.csv; do
+           [ -f "${f}" ] && tail -n +2 "${f}" | head -3 | cut -d, -f1
+         done | sort -u)
+  if [ -n "${_ids}" ]; then
+    mkdir -p "${_S}/raw_wsi"
+    _n=0
+    for _sid in ${_ids}; do
+      _src="${PROJECT_ROOT}/data/moo_collected_tggate_wsi/raw_wsi/${_sid}.svs"
+      if [ -f "${_src}" ]; then rsync -a "${_src}" "${_S}/raw_wsi/" && _n=$((_n+1)); fi
+    done
+    export PVS_RAW_SLIDE_DIR="${_S}/raw_wsi"
+    echo "[stage] ${_n} top-slide WSI -> ${_S}/raw_wsi ($(du -sh "${_S}/raw_wsi" 2>/dev/null | cut -f1 || true))"
+  else
+    echo "[stage] no prior top_slides.csv -> galleries would read WSI from NFS"
+  fi
   echo "[stage] done: $(du -sh "${_S}" 2>/dev/null | cut -f1 || true)"
 '
 
@@ -71,7 +91,14 @@ PYTHON_PATH="${PROJECT_ROOT}/experiments/${EXP_NAME}/experiment.py"
 # =====================================================
 
 RUN_MODE="single"
-RUN_COMMAND="python ${PYTHON_PATH} --config config.yml --atlas-root ${PROJECT_ROOT}/data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver --no-galleries"
+# 図版(patch_gallery)込みで全所見を回す。上位スライドの WSI は PRE_NATIVE_COMMAND で
+# NVMe にステージ済みなので NFS 負荷は最初の rsync(~20G, 一括シーケンシャル)のみ。
+# --overwrite: 直前の --no-galleries sweep で completed になった 25 run_dir を
+# 上書き再実行して patch_gallery を追加する(付けないと全スキップされる)。
+RUN_COMMAND="python ${PYTHON_PATH} --config config.yml --atlas-root ${PROJECT_ROOT}/data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver --overwrite"
+
+# 図版なし・より軽い版(初回 sweep 用):
+# RUN_COMMAND="python ${PYTHON_PATH} --config config.yml --atlas-root ${PROJECT_ROOT}/data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver --no-galleries"
 
 # =====================================================
 # 過去の設定: 0009 と同じ 5 枚 + Necrosis/Kupffer 図版 + Necrosis 手動クロップ、

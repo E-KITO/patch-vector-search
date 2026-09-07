@@ -93,6 +93,11 @@ def parse_args() -> argparse.Namespace:
         "not staged to local SSD). Use this for a whole-atlas sweep: tile-score heatmaps, "
         "top_slides.csv, similar_patches.csv and the thumbnail overlays are still produced.",
     )
+    parser.add_argument(
+        "--overwrite", action="store_true",
+        help="Re-run query sets even if their run_dir is already marked completed (clears the "
+        "completion.json guard first). Use when re-running a finished sweep to add galleries.",
+    )
     return parser.parse_args()
 
 
@@ -196,7 +201,10 @@ def process_query_set(
     check_dirs = [canonical_dir]
     if output_root:
         check_dirs.append(Path(output_root) / exp_name / variant_key)
-    if _completed(*check_dirs):
+    if args.overwrite:
+        for d in check_dirs:
+            (d / "completion.json").unlink(missing_ok=True)
+    elif _completed(*check_dirs):
         print(f"skip (already completed): {variant_key}")
         return
 
@@ -336,11 +344,14 @@ def main() -> None:
 
     # Data paths: prefer a local-SSD staged copy over the NFS original for the
     # search path and thumbnails (staged by run_slurm.sh's PRE_NATIVE_COMMAND).
-    # raw_slide_dir (~600 GB of WSI) is never staged; --no-galleries avoids it.
+    # raw_slide_dir (~600 GB) can't be staged wholesale; --no-galleries avoids it
+    # entirely, but for a galleries run PVS_RAW_SLIDE_DIR can point at a dir
+    # holding just the few dozen top-slide .svs the galleries actually open
+    # (galleries are the only raw-WSI reader; each finding plots top_n_slides_to_plot).
     index_exp_dir = _staged_or(project_root, config["index_exp_dir"], "PVS_INDEX_DIR")
     features_dir = _staged_or(project_root, config["features_dir"], "PVS_FEATURES_DIR")
     thumbnails_dir = _staged_or(project_root, config["thumbnails_dir"], "PVS_THUMBNAILS_DIR")
-    raw_slide_dir = project_root / config["raw_slide_dir"]
+    raw_slide_dir = _staged_or(project_root, config["raw_slide_dir"], "PVS_RAW_SLIDE_DIR")
     scale_centroids_path = project_root / config.get("scale_centroids_path", "data/scale_centroids.npz")
 
     stain_reference_per_tile = config.get("stain_reference_per_tile")
