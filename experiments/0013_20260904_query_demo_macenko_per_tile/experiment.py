@@ -70,8 +70,13 @@ def parse_args() -> argparse.Namespace:
         "--atlas-root", type=str,
         help="A parent folder (e.g. data/query/Nonneoplastic-Lesion-Atlas-...). Each immediate "
         "subfolder is treated as one finding and its images aggregated into one query, so a "
-        "single run sweeps the whole atlas. Per-subfolder runs use the completed-guard, so a "
-        "re-run resumes where it stopped.",
+        "single run sweeps the whole atlas. With --per-image, every image file (recursively) "
+        "becomes its own query instead. Per-query runs use the completed-guard, so a re-run "
+        "resumes where it stopped.",
+    )
+    parser.add_argument(
+        "--per-image", action="store_true",
+        help="With --atlas-root: one query (one run_dir) per image file, not per subfolder.",
     )
     parser.add_argument(
         "--stain_reference", type=str, default=None,
@@ -115,6 +120,13 @@ def resolve_query_sets(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
         root = Path(args.atlas_root)
         if not root.is_dir():
             raise SystemExit(f"--atlas-root {root} is not a directory")
+        if args.per_image:
+            imgs = sorted(str(p) for p in root.rglob("*") if p.suffix.lower() in _IMG_EXTS)
+            if not imgs:
+                raise SystemExit(f"--atlas-root {root} has no images")
+            # 'atlas_img__' prefix so run_slurm.sh's WSI-staging glob can target
+            # exactly these per-image runs.
+            return [(_slug("atlas_img__" + Path(p).stem)[:120], [p]) for p in imgs]
         sets = []
         for sub in sorted(p for p in root.iterdir() if p.is_dir()):
             imgs = _dir_images(sub)
