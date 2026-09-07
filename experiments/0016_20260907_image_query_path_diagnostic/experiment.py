@@ -54,6 +54,19 @@ def _get_project_root() -> Path:
     return Path(project_root)
 
 
+def _staged_or(project_root: Path, config_rel: str, env_var: str) -> Path:
+    """A data path, preferring a local-SSD staged copy (env_var, set by
+    run_slurm.sh's PRE_NATIVE_COMMAND) over the NFS original. The FAISS index and
+    per-slide .h5 feature files are read at high frequency during exact
+    re-ranking (Tier 1c, Tier 2), which must not run against NFS — see the
+    storage policy in run_slurm.sh."""
+    staged = os.environ.get(env_var)
+    if staged and Path(staged).exists():
+        print(f"{env_var}: using staged copy {staged}")
+        return Path(staged)
+    return project_root / config_rel
+
+
 def setup_logger(run_dir: Path, name: str = "experiment") -> logging.Logger:
     logger = logging.getLogger(name)
     logger.setLevel(logging.INFO)
@@ -467,9 +480,11 @@ def main() -> None:
     logger = setup_logger(run_dir, exp_name)
 
     seed = int(config.get("seed", 42))
-    index_exp_dir = project_root / config["index_exp_dir"]
-    features_dir = project_root / config["features_dir"]
-    raw_slide_dir = project_root / config["raw_slide_dir"]
+    index_exp_dir = _staged_or(project_root, config["index_exp_dir"], "PVS_INDEX_DIR")
+    features_dir = _staged_or(project_root, config["features_dir"], "PVS_FEATURES_DIR")
+    # raw WSI (~634 GB) is not staged; Tier 1/2/3 open a few thousand read_region
+    # calls across ~10-50 .svs over the whole run — bounded, same as 0014/0015.
+    raw_slide_dir = _staged_or(project_root, config["raw_slide_dir"], "PVS_RAW_SLIDE_DIR")
     gt_csv = project_root / config["gt_csv"]
     encoder_name = config.get("encoder_name", "uni_v1")
     findings = list(config["findings"])
