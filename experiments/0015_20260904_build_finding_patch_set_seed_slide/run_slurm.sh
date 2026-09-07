@@ -33,10 +33,25 @@ USE_LOCAL_SSD_OUTPUT=1
 PYTHON_PATH="${PROJECT_ROOT}/experiments/${EXP_NAME}/experiment.py"
 
 # =====================================================
-# Seq run: spatial_nms オーバーフロー修正後の再実行。
-#   glycogen@deliver   — 9675 で validate 成立済み。全 GT スライドを seed に
-#                        未ラベルスライドから代表パッチ集を作る(病理レビュー用)。
-#   Hypertrophy@validate — 未検証。seed/hold-out で retrieval+curation が効くか測る。
+# Seq run: whole-patch テクスチャ系の未検証所見への展開(2026-09-05)。
+#   Ground_glass_appearance@deliver — コーパス内4枚。自己検索 best_rank 3.5
+#     (chance 250)、同群ペアなし・3化合物にまたがるのでバッチ効果の懸念が小さい。
+#   Degeneration,_granular,_eosinophilic@deliver — コーパス内5枚。自己検索
+#     best_rank 1.0(chance 200)で全所見中最良。ただし5枚中4枚が EXP 184
+#     (gemfibrozil)、残り1枚も fenofibrate = 同じフィブラート系なので、
+#     引けたものが「顆粒状好酸性変性一般」か「フィブラート系の肝細胞変化」かは
+#     結果の解釈時に注意する。
+#
+# どちらも deliver: GT スライドが4〜5枚と少なく validate では seed が薄くなるため、
+# 全 GT を seed にして未ラベルスライドから集合を作る。recall 指標は得られないので、
+# **実行後に必ず scripts/random_patch_baseline.py でランダム対照を取ること**
+# (hypertrophy は GT recall が良く見えて実際は選別できていなかった。job 9937)。
+#
+# k_candidate_patches / rerank_pool は現状維持(5000)で様子を見る。deliver は
+# 候補が枯れやすい(glycogen deliver は 174 候補で 137枚止まり)ので、target 150 に
+# 届かなければ次で深くする。
+#
+# 実行済み: 9701(glycogen@deliver + Hypertrophy@validate)、9932(Hypertrophy@validate 再実行)。
 # experiment.py の SUPPORTED_FINDINGS / MODES を参照。
 # =====================================================
 
@@ -46,7 +61,7 @@ GRID_ARGS=(
     "--task"
 )
 GRID_VALUES=(
-    "Deposit,_glycogen@deliver Hypertrophy@validate"
+    "Ground_glass_appearance@deliver Degeneration,_granular,_eosinophilic@deliver"
 )
 
 # GRID_VALUES はスペース区切りで seq に展開される。所見名のスペースは "_" で書き、

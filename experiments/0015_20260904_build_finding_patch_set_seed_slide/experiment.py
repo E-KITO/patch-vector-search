@@ -14,10 +14,25 @@ import pandas as pd
 
 
 # Findings the 2026-09-04 self-retrieval diagnostic showed the corpus
-# represents well enough to seed from, and that are whole-patch-texture (not
-# sub-patch focal — see README "所見の2クラス分け"; "Increased mitosis" is the
-# counter-example and was dropped after job 9675). Keep this list conservative.
-SUPPORTED_FINDINGS = ("Deposit, glycogen", "Hypertrophy")
+# represents well enough to seed from, AND that are whole-patch texture — the
+# one class of the three in README "所見の3クラス分け" that patch-level
+# retrieval can serve. Keep this list conservative: a finding earns its place
+# by a random-control check (scripts/random_patch_baseline.py), not by looking
+# like it should work.
+#
+# Dropped after being disproven:
+#   "Increased mitosis" — sub-patch signal; a mitotic figure does not change
+#     how a 224px patch looks (job 9675).
+#   "Hypertrophy" — a *relative* judgement ("larger than normal") with no
+#     reference tissue inside a 224px crop. Its GT recall looked passable
+#     (4/19, 8.7x chance) but a blind random control could not tell its patch
+#     set from uniformly sampled liver (job 9937: 59% vs a 61% baseline, while
+#     glycogen scored 91% under the same judge). Not reachable by deeper search.
+SUPPORTED_FINDINGS = (
+    "Deposit, glycogen",
+    "Ground glass appearance",
+    "Degeneration, granular, eosinophilic",
+)
 
 # validate: split the finding's GT slides seed/hold-out, exclude only the seed
 #   slides, and mark hold-out GT slides so the gt_positive fraction reads as
@@ -179,13 +194,19 @@ def main() -> None:
     else:  # validate
         n_seed = max(1, min(len(finding_slides) - 1, round(seed_fraction * len(finding_slides))))
         seed_pool = [finding_slides[i] for i in perm[:n_seed]]
-        holdout_slides = sorted(finding_slides[i] for i in perm[n_seed:])
-        exclude_slides = set(seed_pool)  # narrowed to the sampled seed below
-        gt_positive_slides = set(holdout_slides)
 
     seed_slides = sorted(seed_pool[:max_seed_slides])
     if args.mode == "validate":
+        # Hold-out is *every* GT slide not actually seeded, so it stays the
+        # complement of seed_slides no matter which of seed_fraction /
+        # max_seed_slides binds. Deriving it from seed_pool instead left the
+        # slides that max_seed_slides trimmed off in neither set: not queried,
+        # not excluded, and not flagged gt_positive, so patches retrieved from
+        # them scored as non-GT and recall read low (job 9701 Hypertrophy
+        # retrieved 4 GT slides but counted 1).
+        holdout_slides = sorted(set(finding_slides) - set(seed_slides))
         exclude_slides = set(seed_slides)
+        gt_positive_slides = set(holdout_slides)
 
     logger.info(f"Starting: {exp_name} / {variant_key}  (mode={args.mode})")
     logger.info(f"finding:        {args.finding}")
