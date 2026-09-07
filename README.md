@@ -911,6 +911,41 @@ uni_v2 での再埋め込み(1000スライド分の GPU 推論)とはコスト�
 見えるが、hypertrophy で「見た目の分類だけでは当てにならない」ことが分かったので、
 0015 + ランダム対照を通すまでは確定させない。
 
+## experiments/0016: クエリ埋め込み経路は 0014 の結論の交絡か(2026-09-07、job 10434)
+
+0014 は「アトラス図版をクエリにすると GT スライドを引けない → アトラス→TG-GATEs の
+ドメインギャップが #1 ブロッカー」と結論したが、0014 の atlas アームと
+self_retrieval_diagnostic / 0015 の TG-GATEs アームは2軸で違っていた: (1) 内容/ドメイン、
+(2) クエリ経路(画像 → `lib.query_embedding.embed_image(_tiles)` のタイル分割・LANCZOS
+リサイズ・空白フィルタ vs h5 特徴量の直読み)。0016 は (2) を単独で測る — コーパスに
+既にあるパッチを使えばドメインギャップは構成上ゼロになる。glycogen と ground glass
+(検証済みの2所見)で3 tier:
+
+- **Tier 1 (roundtrip)**: GT スライドのパッチを raw WSI から `crop_patch` → `embed_image`
+  で再埋め込みし、保存済み h5 ベクトルと比較。**cos_self 中央値 1.0 / min 0.99998**
+  (これらのスライドは patch_size_level0=224 で `crop_patch` がリサイズ不要のため実質
+  同一ピクセル)。再埋め込みベクトルでの検索(自パッチ rank / 自スライド rank / 同一所見
+  他 GT スライドの recall)は **feature アームと完全一致**。
+- **Tier 2 (patchset)**: 同一 seed パッチ集合で 0015 validate を h5 seed / 画像経路 seed の
+  2通り実行。glycogen・ground glass とも **両アーム完全一致**(同じ寄与スライド・同じ
+  150パッチ・同じ hold-out GT recall。`feature_only` / `image_only` ともゼロ)。
+- **Tier 3 (region)**: GT スライドから 14×14 パッチ(~196タイル)の level-0 リージョンを
+  切り出し `embed_image_tiles` で検索 = 「アトラス図版と同じ ROI なし多タイル集約」を
+  ドメイン内・倍率一致で再現。**全リージョンが自スライドを rank 1 で retrieve**、
+  他 GT スライドも target hit@10 0.67〜0.75 / hit@50 0.88〜1.0。
+
+**結論**: クエリ埋め込み経路(`embed_image` / `embed_image_tiles`・タイル分割・リサイズ・
+空白フィルタ・多タイル集約)は 0014 の結論の意味ある交絡ではない。ドメイン内ピクセルを
+正しい倍率で与えれば、画像経路は h5 直読みと同等に検索できる。したがって 0014 の
+「アトラス図版で GT スライドを引けない」失敗は**アトラス図版そのもの**(別スキャナ・
+染色・倍率、図版が非所見組織だらけ、ROI なし)に帰属でき、ツーリングの副作用ではない。
+「ドメインギャップが #1 ブロッカー」は補強された。
+
+ストレージ注: 0016 / 0013 とも exact re-rank の h5 ランダムアクセスが高頻度なので、
+`run_slurm.sh` の `PRE_NATIVE_COMMAND` で index + h5 をノードローカル NVMe にステージ
+してから読む(`PVS_INDEX_DIR` / `PVS_FEATURES_DIR` 等)。`USE_LOCAL_SSD_INPUT=1` は
+`data/`(844G)全体を rsync するので使わない(job 10421 はこれで TIMEOUT した)。
+
 ## 次の一手(成果物トラック)
 
 1. **glycogen deliver の137枚(job 9701)を病理知識のある人にレビューしてもらう** —
