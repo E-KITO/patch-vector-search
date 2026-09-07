@@ -1,0 +1,81 @@
+# ============================================================
+# 0016_20260907_image_query_path_diagnostic
+# ============================================================
+# 0014 は「アトラス図版をクエリにすると GT スライドを引けない」ことから
+# アトラス→TG-GATEs のドメインギャップを #1 ブロッカーと結論した。しかし
+# 0014 の atlas アームと 0015 / self_retrieval_diagnostic の TG-GATEs アームは
+# 2点で違う:
+#   (1) 内容/ドメイン: アトラス図版(大半が非所見・倍率不明・ROI なし・別スキャナ)
+#       vs コーパス内の本物の所見スライド
+#   (2) クエリ経路: 画像 -> lib.query_embedding.embed_image(_tiles)(タイル分割・
+#       リサイズ・blank フィルタ) vs h5 特徴量の直読み
+# つまり「アトラスのドメインギャップ」と「クエリ埋め込みパイプラインの副作用」が
+# 交絡している。この実験は (2) を単独で測る: ドメイン内(TG-GATEs)の seed を
+# h5 直読みではなくピクセルから再埋め込みしても検索が成立するか。
+#
+#   Tier 1 (roundtrip): コーパスにある GT パッチを raw WSI から切り出して
+#     embed_image で再埋め込み、保存済み h5 ベクトルと cos_self を比較。
+#     さらに再埋め込みベクトルで (a) そのパッチ自身、(b) 自スライド、
+#     (c) 同一所見の他 GT スライド を引けるかを h5 直読みと paired で比較。
+#   Tier 2 (patchset): 0015 validate を、同一 seed パッチ集合で 2 通り
+#     (h5 直読み seed / 画像経路 seed)実行し、hold-out GT recall を比較。
+#   Tier 3 (region): GT スライドから大きな level-0 リージョン(N×N パッチ)を
+#     切り出し、embed_image_tiles で「アトラス図版と同じ ROI なしタイル分割」を
+#     ドメイン内・倍率一致の条件で再現。Tier 1b(個別パッチ)と比較して
+#     「大きい画像をタイル分割して引く」ことの寄与を分離する。
+# ============================================================
+
+seed: 42
+
+# --- corpus / index (0015 と同一) ---
+index_exp_dir: "outputs/0002_20260808_build_faiss_index/default"
+features_dir: "data/trident_processed/20x_224px_0px_overlap/features_uni_v1"
+raw_slide_dir: "data/moo_collected_tggate_wsi/raw_wsi"
+gt_csv: "data/processed_csv/single_finding_liver.csv"
+encoder_name: "uni_v1"
+
+# whole-patch テクスチャ系で「機能する」と検証済みの 2 所見に絞る
+# (SUMMARY_20260821-20260906.md「所見の4クラス分け」)。
+findings:
+  - "Deposit, glycogen"
+  - "Ground glass appearance"
+
+# 実行する tier。片方だけ回したいときはリストを削る。
+tiers:
+  - roundtrip
+  - patchset
+  - region
+
+nprobe: 64
+
+# --- Tier 1: roundtrip ---
+tier1:
+  # 1a/1b: GT スライド 1 枚あたり再埋め込みして評価するパッチ数
+  n_patches_per_slide: 96
+  # 1c: そのうち「index 内でのパッチ自己 rank」を測るサブサンプル数
+  #     (search_similar_patches を 1 パッチずつ呼ぶので重い)
+  n_patches_selfrank: 32
+  selfrank_rerank_pool: 2000
+  # 1b: スライド検索の候補プール(search_top_slides_multi)
+  k_candidates_slide: 8000
+
+# --- Tier 2: patchset (0015 validate と同一パラメータ) ---
+tier2:
+  seed_fraction: 0.5
+  max_seed_slides: 6
+  n_seed_patches_per_slide: 120
+  k_candidate_patches: 5000
+  rerank_pool: 5000
+  max_tiles_reranked: null
+  sim_floor: 0.65
+  nms_radius_patches: 1.5
+  max_per_slide: 15
+  target_n_patches: 150
+
+# --- Tier 3: region ---
+tier3:
+  # リージョンの一辺 = region_tiles * patch_size_level0 (14 -> 14x14=196 タイル)
+  region_tiles: 14
+  # GT スライド 1 枚あたり切り出すリージョン数(異なる tissue 位置を中心に)
+  n_regions_per_slide: 2
+  k_candidates_slide: 8000
