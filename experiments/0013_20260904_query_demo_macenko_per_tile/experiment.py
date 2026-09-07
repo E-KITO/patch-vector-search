@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import sys
+import traceback
 from pathlib import Path
 
 import yaml
@@ -299,18 +300,29 @@ def process_query_set(
         query_vecs, k=rerank_pool, nprobe=nprobe, rerank_pool=rerank_pool,
         max_tiles_reranked=max_tiles_reranked,
     )
+    n_gal = 0
     for slide_id in top_slides["slide_id"].head(params["top_n_slides_to_plot"]):
         hits = hit_pool[hit_pool["slide_id"] == slide_id]
         if hits.empty:
             continue
-        fig = plot_fns["thumbnail"](slide_id, hits, params["thumbnails_dir"], patch_index.slide_meta)
-        fig.savefig(plots_dir / f"{slide_id}.png", dpi=150)
-        plot_fns["close"](fig)
+        try:
+            fig = plot_fns["thumbnail"](slide_id, hits, params["thumbnails_dir"], patch_index.slide_meta)
+            fig.savefig(plots_dir / f"{slide_id}.png", dpi=150)
+            plot_fns["close"](fig)
+        except Exception as e:
+            logger.warning(f"thumbnail plot failed for slide {slide_id}: {e!r}")
 
         if not args.no_galleries:
-            gallery_fig = plot_fns["gallery"](hits, params["raw_slide_dir"], patch_index.slide_meta)
-            gallery_fig.savefig(gallery_dir / f"{slide_id}.png", dpi=150)
-            plot_fns["close"](gallery_fig)
+            try:
+                gallery_fig = plot_fns["gallery"](hits, params["raw_slide_dir"], patch_index.slide_meta)
+                gallery_fig.savefig(gallery_dir / f"{slide_id}.png", dpi=150)
+                plot_fns["close"](gallery_fig)
+                n_gal += 1
+            except Exception as e:
+                # e.g. the slide's .svs is not in a partial PVS_RAW_SLIDE_DIR stage
+                logger.warning(f"gallery failed for slide {slide_id}: {e!r}")
+    if not args.no_galleries:
+        logger.info(f"galleries written: {n_gal}")
 
     results = {
         "image": images,
@@ -426,17 +438,27 @@ def main() -> None:
     }
 
     n_done = 0
+    n_failed = 0
     for variant_stem, images in query_sets:
-        process_query_set(
-            variant_stem=variant_stem, images=images, project_root=project_root,
-            exp_name=exp_name, output_root=output_root, patch_index=patch_index,
-            tile_transform=tile_transform, centroids=centroids, args=args,
-            params=params, plot_fns=plot_fns,
-        )
-        n_done += 1
-        print(f"[{n_done}/{len(query_sets)}] {variant_stem} done")
+        try:
+            process_query_set(
+                variant_stem=variant_stem, images=images, project_root=project_root,
+                exp_name=exp_name, output_root=output_root, patch_index=patch_index,
+                tile_transform=tile_transform, centroids=centroids, args=args,
+                params=params, plot_fns=plot_fns,
+            )
+            n_done += 1
+        except Exception:
+            # one bad query set (e.g. a corrupt image) must not abort a 94-query
+            # sweep; its run_dir stays without completion.json so a re-run retries.
+            n_failed += 1
+            traceback.print_exc()
+            print(f"!! query set FAILED: {variant_stem}")
+        print(f"[{n_done + n_failed}/{len(query_sets)}] {variant_stem}")
 
-    print(f"All {len(query_sets)} query set(s) complete.")
+    print(f"Done: {n_done} ok, {n_failed} failed, of {len(query_sets)} query set(s).")
+    if n_failed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

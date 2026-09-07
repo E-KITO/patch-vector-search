@@ -56,28 +56,28 @@ PRE_NATIVE_COMMAND='
   export PVS_INDEX_DIR="${_S}/index"
   export PVS_FEATURES_DIR="${_S}/features"
   export PVS_THUMBNAILS_DIR="${_S}/thumbnails"
-  # Galleries open raw WSI only for the top top_n_slides_to_plot slides per query.
-  # Take that N from config.yml and union those slide ids across every prior
-  # atlas run (folder-aggregate and per-image), stage just those .svs.
+  # raw_wsi staging dir is a hybrid: symlinks to every corpus .svs (so any slide
+  # a gallery asks for resolves), with the top top_n_slides_to_plot slides per
+  # prior atlas run replaced by real local copies. Galleries only open the top
+  # slides -> those hit NVMe; a slide not in a prior run (e.g. pass 2 run without
+  # pass 1) still works via the symlink, just reading over NFS.
+  _rw="${_S}/raw_wsi"
+  mkdir -p "${_rw}"
+  ln -sfn "${PROJECT_ROOT}/data/moo_collected_tggate_wsi/raw_wsi/"*.svs "${_rw}/" 2>/dev/null || true
   _topn=$(grep -oP "^top_n_slides_to_plot:\s*\K[0-9]+" "${PROJECT_ROOT}/experiments/${EXP_NAME}/config.yml" || echo 3)
   _ids=$(for f in \
            "${PROJECT_ROOT}"/outputs/0013_20260904_query_demo_macenko_per_tile/query__*Nonneoplastic_Lesion_Atlas__pertilenorm/top_slides.csv \
            "${PROJECT_ROOT}"/outputs/0013_20260904_query_demo_macenko_per_tile/query__atlas_img__*__pertilenorm/top_slides.csv; do
            [ -f "${f}" ] && tail -n +2 "${f}" | head -n "${_topn}" | cut -d, -f1
          done | sort -u)
-  if [ -n "${_ids}" ]; then
-    mkdir -p "${_S}/raw_wsi"
-    _n=0
-    for _sid in ${_ids}; do
-      _src="${PROJECT_ROOT}/data/moo_collected_tggate_wsi/raw_wsi/${_sid}.svs"
-      if [ -f "${_src}" ]; then rsync -a "${_src}" "${_S}/raw_wsi/" && _n=$((_n+1)); fi
-    done
-    export PVS_RAW_SLIDE_DIR="${_S}/raw_wsi"
-    echo "[stage] ${_n} top-slide WSI (top-${_topn}/query) -> ${_S}/raw_wsi ($(du -sh "${_S}/raw_wsi" 2>/dev/null | cut -f1 || true))"
-  else
-    echo "[stage] no prior top_slides.csv -> galleries would read WSI from NFS"
-  fi
-  echo "[stage] done: $(du -sh "${_S}" 2>/dev/null | cut -f1 || true)"
+  _n=0
+  for _sid in ${_ids}; do
+    _src="${PROJECT_ROOT}/data/moo_collected_tggate_wsi/raw_wsi/${_sid}.svs"
+    if [ -f "${_src}" ]; then rm -f "${_rw}/${_sid}.svs"; rsync -a "${_src}" "${_rw}/" && _n=$((_n+1)); fi
+  done
+  export PVS_RAW_SLIDE_DIR="${_rw}"
+  echo "[stage] raw_wsi: $(ls "${_rw}" | wc -l) slides (${_n} real local copies, top-${_topn}/query; rest -> NFS symlink)"
+  echo "[stage] done, local NVMe used: $(du -sh "${_S}" 2>/dev/null | cut -f1 || true)"
 '
 
 PYTHON_PATH="${PROJECT_ROOT}/experiments/${EXP_NAME}/experiment.py"
