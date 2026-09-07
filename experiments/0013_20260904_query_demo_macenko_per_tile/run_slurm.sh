@@ -64,7 +64,7 @@ GRID_ARGS=(
     "--image"
 )
 GRID_VALUES=(
-    "${PROJECT_ROOT}/data/query/hypertrophy_imgi10_a53058.jpg ${PROJECT_ROOT}/data/query/fatty_change_imgi9_a54647.jpg ${PROJECT_ROOT}/data/query/inflammation_imgi8_a20304.jpg ${PROJECT_ROOT}/data/query/atrophy_imgi6_a74713.jpg ${PROJECT_ROOT}/data/query/hematopoiesis_imgi6_a71206.jpg ${PROJECT_ROOT}/data/query/necrosis_imgi11_a30016.jpg ${PROJECT_ROOT}/data/query/necrosis_imgi11_crop_x150_y400.jpg ${PROJECT_ROOT}/data/query/kupffer_imgi6_a19999.jpg"
+    "${PROJECT_ROOT}/data/query/query_001.png ${PROJECT_ROOT}/data/query/query_002.png ${PROJECT_ROOT}/data/query/query_003.png"
 )
 
 # =====================================================
