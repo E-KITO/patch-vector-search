@@ -61,10 +61,15 @@ PRE_NATIVE_COMMAND='
   # prior atlas run replaced by real local copies. Galleries only open the top
   # slides -> those hit NVMe; a slide not in a prior run (e.g. pass 2 run without
   # pass 1) still works via the symlink, just reading over NFS.
+  # This whole block is best-effort: set +e so an unmatched glob / rsync hiccup
+  # never aborts the job. If it fails to populate, PVS_RAW_SLIDE_DIR is left
+  # unset and experiment.py reads WSI from NFS (with per-gallery try/except).
+  set +e
   _rw="${_S}/raw_wsi"
   mkdir -p "${_rw}"
-  ln -sfn "${PROJECT_ROOT}/data/moo_collected_tggate_wsi/raw_wsi/"*.svs "${_rw}/" 2>/dev/null || true
-  _topn=$(grep -oP "^top_n_slides_to_plot:\s*\K[0-9]+" "${PROJECT_ROOT}/experiments/${EXP_NAME}/config.yml" || echo 3)
+  ln -sfn "${PROJECT_ROOT}/data/moo_collected_tggate_wsi/raw_wsi/"*.svs "${_rw}/" 2>/dev/null
+  _topn=$(grep -oP "^top_n_slides_to_plot:\s*\K[0-9]+" "${PROJECT_ROOT}/experiments/${EXP_NAME}/config.yml")
+  [ -z "${_topn}" ] && _topn=3
   _ids=$(for f in \
            "${PROJECT_ROOT}"/outputs/0013_20260904_query_demo_macenko_per_tile/query__*Nonneoplastic_Lesion_Atlas__pertilenorm/top_slides.csv \
            "${PROJECT_ROOT}"/outputs/0013_20260904_query_demo_macenko_per_tile/query__atlas_img__*__pertilenorm/top_slides.csv; do
@@ -73,10 +78,18 @@ PRE_NATIVE_COMMAND='
   _n=0
   for _sid in ${_ids}; do
     _src="${PROJECT_ROOT}/data/moo_collected_tggate_wsi/raw_wsi/${_sid}.svs"
-    if [ -f "${_src}" ]; then rm -f "${_rw}/${_sid}.svs"; rsync -a "${_src}" "${_rw}/" && _n=$((_n+1)); fi
+    if [ -f "${_src}" ] && rsync -a "${_src}" "${_rw}/.stage.svs" && mv -f "${_rw}/.stage.svs" "${_rw}/${_sid}.svs"; then
+      _n=$((_n + 1))
+    fi
   done
-  export PVS_RAW_SLIDE_DIR="${_rw}"
-  echo "[stage] raw_wsi: $(ls "${_rw}" | wc -l) slides (${_n} real local copies, top-${_topn}/query; rest -> NFS symlink)"
+  _nslides=$(ls "${_rw}" 2>/dev/null | wc -l)
+  if [ "${_nslides}" -gt 0 ]; then
+    export PVS_RAW_SLIDE_DIR="${_rw}"
+    echo "[stage] raw_wsi: ${_nslides} slides (${_n} real local copies, top-${_topn}/query; rest -> NFS symlink)"
+  else
+    echo "[stage] raw_wsi staging produced nothing -> galleries will read WSI from NFS"
+  fi
+  set -e
   echo "[stage] done, local NVMe used: $(du -sh "${_S}" 2>/dev/null | cut -f1 || true)"
 '
 
