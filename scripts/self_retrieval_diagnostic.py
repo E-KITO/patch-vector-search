@@ -20,14 +20,29 @@ index), search the index, drop the query slide from the results, and record
 where the *other* same-finding slides land in the ranking. Aggregate per
 finding and compare against the random-chance baseline.
 
-Two knobs that matter for interpretation:
+Knobs that matter for interpretation:
   - ranking key: n_hits_ratio (what search_top_slides_multi sorts by) vs
     max_similarity. experiments/0013 finding 2 was that these diverge; this
     script reports rank under both so the divergence is quantified per finding.
-  - same-group exclusion: two slides from the same EXP_ID+GROUP_ID share
-    compound/dose/timepoint and will look alike for batch reasons, not just
-    the finding. Metrics are reported both with all same-finding targets and
-    with same-group targets dropped.
+  - batch exclusion, two tiers: two slides from the same EXP_ID+GROUP_ID share
+    compound/dose/timepoint; two slides from the same EXP_ID still share the
+    compound, the study's staining/scanning batch, the animal strain and the
+    fixation. Either way they look alike for batch reasons, not just the
+    finding. Best rank is reported with all same-finding targets, with
+    same-group targets dropped (_nogrp), and with the whole same study dropped
+    (_noexp).
+  - confound coverage: n_compounds / n_exp_ids count how many distinct
+    compounds / studies a finding's corpus slides span. A finding whose slides
+    come from only 1-2 compounds cannot have its retrieval ceiling separated
+    from "the model clusters that compound's liver" at all, no matter which
+    exclusion tier is applied.
+
+Batch negative control: for each query slide, also rank the slides from the
+SAME study (EXP_ID) that carry a DIFFERENT finding, and compare their best
+rank to the same-finding-different-study targets. If the same-study/other-
+finding slides rank at least as high (batch_dominates_finding_rate), the
+retrieval is tracking the batch, not the finding, and the measured "ceiling"
+for that finding is not trustworthy.
 
 Output: outputs/gt_validations/self_retrieval_diagnostic.csv
 """
@@ -86,6 +101,22 @@ def load_query_vecs(slide_id: str, rng: np.random.Generator) -> np.ndarray:
     return vecs / norms
 
 
+def batch_dominates_rate(pairs: list[tuple]) -> float | None:
+    """Fraction of query slides where the same-study / other-finding peer ranks
+    at least as high as the best same-finding / other-study target.
+
+    `pairs` is a list of (batch_peer_best_rank, finding_target_best_rank), one
+    per query slide that had at least one same-study/other-finding peer. Queries
+    with no same-finding/other-study target to compare against are skipped (they
+    carry no information about which signal the retrieval is tracking).
+    """
+    comparable = [(b, f) for b, f in pairs if f is not None]
+    if not comparable:
+        return None
+    hits = [1.0 if (b is not None and b <= f) else 0.0 for b, f in comparable]
+    return round(float(np.mean(hits)), 2)
+
+
 def ranks_of(ranked_slides: list[str], targets: set[str]) -> dict:
     """Positions (1-indexed) of `targets` within an ordered slide list."""
     pos = [i + 1 for i, s in enumerate(ranked_slides) if s in targets]
@@ -111,6 +142,15 @@ def main() -> None:
     gt = gt[gt["slide_id"].isin(corpus_slides)].copy()
     gt["group_key"] = gt["EXP_ID"].astype(str) + "_" + gt["GROUP_ID"].astype(str)
     group_of = dict(zip(gt["slide_id"], gt["group_key"]))
+    exp_of = dict(zip(gt["slide_id"], gt["EXP_ID"].astype(str)))
+    compound_of = dict(zip(gt["slide_id"], gt["COMPOUND_NAME"]))
+    # a slide's finding(s); single_finding_liver.csv is one finding per slide,
+    # but a slide can still have >1 row (topography/grade) so aggregate to a set.
+    finding_set_of = (
+        gt.groupby("slide_id")["FINDING_TYPE"].agg(lambda s: set(s)).to_dict()
+    )
+    # every single-finding corpus slide -- the pool the batch control draws from.
+    all_sf_slides = sorted(gt["slide_id"].unique())
 
     finding_to_slides = (
         gt.groupby("FINDING_TYPE")["slide_id"].agg(lambda s: sorted(set(s))).to_dict()
@@ -133,7 +173,21 @@ def main() -> None:
             idx = rng.choice(len(slides), size=MAX_QUERY_SLIDES_PER_FINDING, replace=False)
             query_slides = [slides[i] for i in sorted(idx)]
 
-        per_query = {key: [] for key in ("nhr_all", "sim_all", "nhr_grp", "sim_grp")}
+        per_query = {
+            key: []
+            for key in (
+                "nhr_all",
+                "sim_all",
+                "nhr_grp",
+                "sim_grp",
+                "nhr_exp",
+                "sim_exp",
+                "batchctl",
+            )
+        }
+        # (batch_peer_best_rank, finding_target_best_rank) per query slide that
+        # had >= 1 same-study / other-finding peer -- feeds batch_dominates_rate.
+        batch_vs_finding: list[tuple] = []
         for q in query_slides:
             q_vecs = load_query_vecs(q, rng)
             ranked = pi.search_top_slides_multi(
@@ -148,12 +202,32 @@ def main() -> None:
 
             targets_all = set(slides) - {q}
             targets_grp = {s for s in targets_all if group_of.get(s) != group_of.get(q)}
+            targets_exp = {s for s in targets_all if exp_of.get(s) != exp_of.get(q)}
+            # batch control pool: same study (EXP_ID), different finding.
+            q_findings = finding_set_of.get(q, set())
+            batch_peers = {
+                s
+                for s in all_sf_slides
+                if s != q
+                and exp_of.get(s) == exp_of.get(q)
+                and finding_set_of.get(s, set()).isdisjoint(q_findings)
+            }
 
             per_query["nhr_all"].append(ranks_of(by_nhr, targets_all))
             per_query["sim_all"].append(ranks_of(by_sim, targets_all))
             if targets_grp:
                 per_query["nhr_grp"].append(ranks_of(by_nhr, targets_grp))
                 per_query["sim_grp"].append(ranks_of(by_sim, targets_grp))
+            if targets_exp:
+                per_query["nhr_exp"].append(ranks_of(by_nhr, targets_exp))
+                per_query["sim_exp"].append(ranks_of(by_sim, targets_exp))
+            if batch_peers:
+                bc = ranks_of(by_nhr, batch_peers)
+                per_query["batchctl"].append(bc)
+                fc_best = (
+                    ranks_of(by_nhr, targets_exp)["best_rank"] if targets_exp else None
+                )
+                batch_vs_finding.append((bc["best_rank"], fc_best))
 
         def agg(key: str, metric: str):
             vals = [d[metric] for d in per_query[key] if d[metric] is not None]
@@ -184,13 +258,28 @@ def main() -> None:
             # same-group targets dropped (finding-similarity, not batch-similarity)
             "nhr_best_rank_med_nogrp": agg("nhr_grp", "best_rank"),
             "sim_best_rank_med_nogrp": agg("sim_grp", "best_rank"),
+            # --- confound diagnostics ---
+            # distinct compounds / studies the finding's corpus slides span;
+            # <= 2 compounds => finding vs compound is not separable at all.
+            "n_compounds": len({compound_of.get(s) for s in slides}),
+            "n_exp_ids": len({exp_of.get(s) for s in slides}),
+            # whole same study (EXP_ID) dropped -- stricter than same-group
+            "nhr_best_rank_med_noexp": agg("nhr_exp", "best_rank"),
+            "sim_best_rank_med_noexp": agg("sim_exp", "best_rank"),
+            "nhr_hit@50_noexp": hit_rate("nhr_exp", 50),
+            # batch negative control: same EXP_ID, different finding
+            "n_queries_batch_ctl": len(batch_vs_finding),
+            "batchctl_best_rank_med": agg("batchctl", "best_rank"),
+            "batch_dominates_finding_rate": batch_dominates_rate(batch_vs_finding),
         }
         rows.append(row)
         print(
-            f"{finding:38s} n={len(slides):2d}  "
-            f"nhr_best={row['nhr_best_rank_med']}  sim_best={row['sim_best_rank_med']}  "
+            f"{finding:38s} n={len(slides):2d} nC={row['n_compounds']:2d} nE={row['n_exp_ids']:2d}  "
+            f"nhr_best={row['nhr_best_rank_med']}  "
+            f"nogrp={row['nhr_best_rank_med_nogrp']}  noexp={row['nhr_best_rank_med_noexp']}  "
             f"random={row['random_best_rank']}  "
-            f"nhr_hit@50={row['nhr_hit@50']}  sim_hit@50={row['sim_hit@50']}",
+            f"nhr_hit@50={row['nhr_hit@50']}  "
+            f"batch_dom={row['batch_dominates_finding_rate']}(n={row['n_queries_batch_ctl']})",
             flush=True,
         )
 
