@@ -401,8 +401,13 @@ _handle_final_state() {
 # =====================================================
 
 on_error() {
+    # Capture the failing command's exit code BEFORE any other command runs.
+    # `trap - ERR` (and even `local exit_code=$?` on its own line, if a prior
+    # statement intervened) resets $?, so the real code was previously lost and
+    # every banner printed "exit code: 0". Prefer the value passed by the trap
+    # ($2), falling back to $? for safety.
+    local exit_code="${2:-$?}"
     trap - ERR
-    local exit_code=$?
     local line_no="${1:-unknown}"
 
     echo ""
@@ -412,7 +417,7 @@ on_error() {
     _handle_final_state "${exit_code}" "${line_no}"
 }
 
-trap 'on_error ${LINENO}' ERR
+trap 'on_error ${LINENO} $?' ERR
 
 TERMINATED=0
 
