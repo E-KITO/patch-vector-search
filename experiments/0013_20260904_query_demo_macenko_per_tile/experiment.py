@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import sys
 import traceback
 from pathlib import Path
@@ -146,6 +147,56 @@ def resolve_query_sets(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
         return [(_slug(d.name)[:120], imgs)]
     stems = [_slug(Path(p).stem) for p in args.image]
     return [("+".join(stems)[:120], list(args.image))]
+
+
+def stage_wsi_hybrid(project_root: Path, scratch_dir: str, exp_name: str, top_n: int, logger) -> Path | None:
+    """Build ${scratch_dir}/staged_wsi: a symlink to every corpus .svs (so any
+    slide a gallery asks for resolves) with the top `top_n` slides from prior
+    atlas top_slides.csv replaced by real local copies. Best-effort — any failure
+    logs and returns None so the caller keeps reading WSI from NFS.
+
+    Done here rather than in run_slurm.sh's PRE_NATIVE_COMMAND because that runs
+    under `set -euo pipefail` + an ERR trap where an unmatched glob aborted the
+    whole job (see git history: jobs 10437/10438)."""
+    src = project_root / "data/moo_collected_tggate_wsi/raw_wsi"
+    dst = Path(scratch_dir) / "staged_wsi"
+    try:
+        import pandas as pd
+
+        dst.mkdir(parents=True, exist_ok=True)
+        n_link = 0
+        for svs in src.glob("*.svs"):
+            link = dst / svs.name
+            if not link.exists():
+                link.symlink_to(svs)
+                n_link += 1
+        ids: set[str] = set()
+        for csv in sorted((project_root / "outputs" / exp_name).glob("query__*__pertilenorm/top_slides.csv")):
+            try:
+                ids.update(pd.read_csv(csv)["slide_id"].astype(str).head(top_n))
+            except Exception:
+                pass
+        n_real = 0
+        for sid in sorted(ids):
+            s = src / f"{sid}.svs"
+            if not s.exists():
+                continue
+            try:
+                tmp = dst / f".{sid}.svs.tmp"
+                shutil.copy2(s, tmp)
+                tmp.replace(dst / f"{sid}.svs")
+                n_real += 1
+            except Exception as e:
+                logger.warning(f"WSI stage: copy {sid} failed: {e!r}")
+        n_total = len(list(dst.glob("*.svs")))
+        logger.info(
+            f"WSI stage -> {dst}: {n_total} slides ({n_link} new symlinks, {n_real} real "
+            f"local copies of top-{top_n} slides from {len(ids)} prior-run ids)"
+        )
+        return dst if n_total else None
+    except Exception as e:
+        logger.warning(f"WSI staging failed ({e!r}); galleries will read WSI from NFS")
+        return None
 
 
 def _staged_or(project_root: Path, config_rel: str, env_var: str, logger=None) -> Path:
@@ -416,6 +467,23 @@ def main() -> None:
         slide_meta_path=index_exp_dir / "slide_meta.parquet",
         features_dir=features_dir,
     )
+
+    # Stage the top-slide WSI to local NVMe for the galleries (only reader of raw
+    # WSI). Skipped if --no-galleries, if PVS_RAW_SLIDE_DIR is already set, or if
+    # there's no node-local scratch. Best-effort: on failure, raw_slide_dir stays
+    # on NFS and per-gallery try/except keeps the sweep alive.
+    _mainlog = logging.getLogger("experiment.main")
+    _mainlog.setLevel(logging.INFO)
+    if not _mainlog.handlers:
+        _h = logging.StreamHandler(sys.stdout)
+        _h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        _mainlog.addHandler(_h)
+    top_n_plot = int(config.get("top_n_slides_to_plot", 3))
+    scratch_dir = os.environ.get("SCRATCH_DIR")
+    if not args.no_galleries and not os.environ.get("PVS_RAW_SLIDE_DIR") and scratch_dir:
+        staged_wsi = stage_wsi_hybrid(project_root, scratch_dir, exp_name, top_n_plot, _mainlog)
+        if staged_wsi is not None:
+            raw_slide_dir = staged_wsi
 
     params = {
         "stain_reference_per_tile": str(stain_reference_per_tile) if stain_reference_per_tile else None,
