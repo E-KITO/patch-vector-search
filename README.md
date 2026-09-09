@@ -591,10 +591,12 @@ GTがあるのは7カテゴリだけ、ラベルはスライド単位)である�
 > コピー、いずれも `matched` 図版)に基づいており NNL アトラスの誤格納の影響を受けない。
 > ただし 0013 は後日 `--atlas-root` で ①所見フォルダ集約(25クエリ、job 10429)と
 > ②画像1枚ずつ(91クエリ、job 10435/10437/10438)のバルク sweep も回しており、
-> **①の 9 dir**(`query__Liver_-_Necrosis_...` など)が誤格納フォルダの中身で計算されていた。
-> 誤格納修正後に ① を回し直し(`--no-galleries --overwrite`、`run_slurm.sh` 参照)、
-> ②の孤児 dir 3件(削除した ` (1).jpg` 由来)を削除した。②本体は dir 名が画像ファイル名
-> なので影響なし。
+> **①の 9 dir**(`query__Liver_-_Necrosis_...`(4→10図版)、Kupffer(4→1)、Hypertrophy(5→9)、
+> Hyperplasia-Nodular(7→2)、Intrahepatocellular-Erythrocytes(4→2)、Focus(3→5)、
+> Stellate(4→2)、Inflammation(4→6)、Hepatodiaphragmatic-Nodule(8→3))が誤格納フォルダの
+> 中身で計算されていた。誤格納修正後に **job 10468** で ① を回し直し
+> (`--no-galleries --overwrite`、25クエリ `0 failed`)、②の孤児 dir 3件(削除した
+> ` (1).jpg` 由来)を削除した。②本体は dir 名が画像ファイル名なので影響なし。
 
 ### 発見1: per-tile Macenkoは「局所の好塩基性所見」のタイル識別を明確に改善する
 
