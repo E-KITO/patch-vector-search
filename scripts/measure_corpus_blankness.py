@@ -141,12 +141,12 @@ def _merge_and_summarise() -> None:
     merged.to_parquet(MERGED_PATH, index=False)
     print(f"\nwrote {MERGED_PATH}: {len(merged):,} patches from {len(parts)} slides", flush=True)
 
-    bg = is_background(merged["mean_intensity"].to_numpy(), merged["sat_frac"].to_numpy())
+    bg = is_background(merged["sat_frac"].to_numpy())
     legacy = merged["is_blank_legacy"].to_numpy()
-    print("\n--- provisional summary (threshold NOT yet decided -- see experiments/0017) ---")
-    print(f"provisional background (sat_frac<0.10 & mean>215): {int(bg.sum()):,} ({100 * bg.mean():.2f}%)")
-    print(f"legacy _is_blank_tile  (mean>240 & std<8):         {int(legacy.sum()):,} ({100 * legacy.mean():.2f}%)")
-    print(f"flagged by provisional but not legacy:             {int((bg & ~legacy).sum()):,}")
+    print("\n--- summary ---")
+    print(f"background (sat_frac < 0.10):              {int(bg.sum()):,} ({100 * bg.mean():.2f}%)")
+    print(f"legacy _is_blank_tile (mean>240 & std<8):  {int(legacy.sum()):,} ({100 * legacy.mean():.2f}%)")
+    print(f"flagged by sat_frac but not legacy:        {int((bg & ~legacy).sum()):,}")
     qs = [0.0, 0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99, 1.0]
     for col in ("mean_intensity", "std_intensity", "sat_frac"):
         q = merged[col].quantile(qs)

@@ -1,0 +1,39 @@
+# ============================================================
+# Experiment Configuration
+# ============================================================
+# - Fixed hyperparameters go here.
+# - Variable dimensions (model, seed, prompt, ...) go in run_slurm.sh GRID_ARGS.
+# - Do NOT hardcode values you intend to sweep.
+# ============================================================
+
+# --- Hyperparameters ---
+seed: 42
+# train_sample_sizeは0018(OPQ+IVF+PQ学習、未作成)の入力になる。OPQ学習コストは
+# おおよそ学習ベクトル数に比例して増えるため、大きくしすぎない
+# (500,000は目安。nlist=4096に対しては十分な比率 — FAISSの目安は
+# クラスタあたり数十〜数百点で、500,000/4096≈122点/クラスタ)。0001と同値。
+#
+# 2026-09-09: エンコーダ(uni_v1)・パッチサイズ(224px)・染色正規化なし、すべて
+# 0001から不変。唯一の違いはスライド背景パッチ(実質無染色 = sat_frac < 0.10)を
+# manifest・slide_meta・学習サンプルから除外すること。UNIはパッチを1枚ずつ
+# 独立に埋め込むため、背景行をmanifestから落とすだけで再エンベディングは不要
+# (READMEの「背景パッチ」節)。
+features_dir: "data/trident_processed/20x_224px_0px_overlap/features_uni_v1"
+train_sample_size: 500000
+
+# scripts/measure_corpus_blankness.py が出力する corpus_blankness.parquet
+# (slide_id, local_idx, mean_intensity, std_intensity, sat_frac, is_blank_legacy)。
+# 全18.4Mパッチをraw WSIから切り出してHSV彩度を測ったもの(job 10487、2026-09-09、
+# 0スライド失敗)。build_patch_manifest は sat_frac < background_sat_frac_max の
+# パッチを背景とみなし除外する。
+#
+# 閾値0.10は job 10491 の監査コンタクトシート(outputs/measure_corpus_blankness/
+# audit/)で確定:sat_frac 0.10 未満の bin は全域がスライド背景・切片エッジの
+# 細片・空視野中の赤血球・カバーガラス由来アーティファクトで、診断対象の組織は
+# ~0.15 から現れる。当初検討していた `& mean_intensity > 215` ガードは、
+# sat_frac 0.10 未満に暗い組織は存在せず、明白なゴミ(ピンぼけのグレー、カバー
+# ガラスのひび、走査端の半黒パッチ)を約1,500枚残すだけだったので不採用。
+# lib.patch_blankness.is_background と lib/manifest.py::_load_blankness_exclusions
+# を参照。
+background_blankness_path: "outputs/measure_corpus_blankness/corpus_blankness.parquet"
+background_sat_frac_max: 0.10

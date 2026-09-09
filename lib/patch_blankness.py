@@ -8,10 +8,15 @@ lib.query_embedding._is_blank_tile (bright + low pixel variance only) misses
 background that is bright but simply unstained.
 
 `is_background` turns those measurements into the verdict used to drop rows
-from the corpus manifest (scripts/measure_corpus_blankness.py -> a filtered
-build_patch_manifest). The thresholds are provisional: measure_corpus_blankness
-writes the raw fractions for every patch so the cut can be retuned against the
-full-corpus distribution without re-cropping.
+from the corpus manifest (scripts/measure_corpus_blankness.py ->
+experiments/0017). The cut is `sat_frac < 0.10`, fixed after the job 10491
+audit (outputs/measure_corpus_blankness/audit/): every sat_frac bin below 0.10
+is slide background / section-edge slivers / RBC-in-empty-field / coverslip
+artifact with no diagnostic tissue, and real tissue content only appears from
+~0.15. An earlier `& mean_intensity > 215` guard was dropped -- it protected
+no dark tissue (there is none below sat_frac 0.10) and only kept ~1,500
+obvious-garbage patches (out-of-focus grey, coverslip cracks, half-black
+edge-of-scan).
 """
 from __future__ import annotations
 
@@ -38,23 +43,11 @@ def blankness_metrics(img: Image.Image) -> dict[str, float]:
     }
 
 
-def is_background(
-    mean_intensity,
-    sat_frac,
-    *,
-    sat_frac_max: float = 0.10,
-    mean_min: float = 215.0,
-):
-    """Provisional corpus background criterion: bright and essentially unstained.
+def is_background(sat_frac, *, sat_frac_max: float = 0.10):
+    """Corpus background criterion: essentially no stained pixels.
 
-    Matches scripts/blank_patch_similarity_diagnostic.py's is_background column
-    (sat_frac < 0.10 & mean_intensity > 215), calibrated by eye on ~2000
-    sampled patches. Parameterised so the threshold pass before the filtered
-    manifest build can sweep it against the full-corpus distribution. Bias the
-    final cut toward false negatives -- leaving a little background in is safer
-    than dropping genuine sparse tissue (sinusoidal dilation, oedema, early
-    necrosis with cell dropout).
-
-    Accepts scalars or numpy arrays; returns the same shape.
+    A patch is background if fewer than `sat_frac_max` of its pixels carry any
+    real stain colour. Fixed at 0.10 by the job 10491 audit (see the module
+    docstring). Accepts a scalar or a numpy array; returns the same shape.
     """
-    return (np.asarray(sat_frac) < sat_frac_max) & (np.asarray(mean_intensity) > mean_min)
+    return np.asarray(sat_frac) < sat_frac_max
