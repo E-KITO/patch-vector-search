@@ -5,7 +5,7 @@ UNIパッチ埋め込みに対するクラスタベースのベクトル検索
 類似する組織パッチと、それを多く含むWSIを検索できる。  
 **最終的な目標は、INHANDやNTPの非腫瘍性病変アトラスのような、所見の代表的なパッチを検索クエリとして使い、TGGATEの大規模なWSIコーパスから同じ所見を引き出してデータベース化すること。**
 
-## 現状(2026-09-05時点)
+## 現状(2026-09-08時点)
 
 - **動くもの**: 任意の画像(1枚〜複数枚)を渡すと、類似パッチ検索とWSI逆引きができる。
   実解像度でのヒットパッチ表示・クエリタイルごとの近似スコアヒートマップ表示も追加済み
@@ -25,20 +25,27 @@ UNIパッチ埋め込みに対するクラスタベースのベクトル検索
   manifest に**約35万枚の背景パッチが残っている**。検索がこれを引くと候補が汚染される
   (granular で顕在化)。修正には索引再構築が要るが GPU 再埋め込みは不要。
   下記「背景パッチ」参照。
-- **モデル/コーパスの検索天井**: 2026-09-04の自己検索診断
-  (`scripts/self_retrieval_diagnostic.py`、下記「自己検索診断」参照)で、
-  **uni_v1 + 現行コーパスは大半のcommonな肝所見を検索に足るレベルで表現できている**
-  ことを確認(16所見中10所見が chance を大きく上回りhit@50 ≥ 0.75)。
-  **例外は融合壊死(`Necrosis`)と髄外造血** — この2所見だけは表現の限界。
-  中核仮説(代表パッチ→類似パッチ検索)は「機能する所見」については成立している。
+- **モデル/コーパスの検索天井**: 自己検索診断
+  (`scripts/self_retrieval_diagnostic.py`、2026-09-04、2026-09-08にバッチ交絡の扱いを
+  拡張、下記「自己検索診断」参照)で、**uni_v1 + 現行コーパスがバッチ交絡(同一化合物・
+  同一 study)抜きで「検索に足る」と示せたのは 5〜6の common な肝所見**
+  (Microgranuloma / Cellular infiltration / Swelling / Deposit glycogen /
+  Ground glass appearance、Increased mitosis は境界)。当初「16所見中10所見」としていたが、
+  同一 study 除外とバッチ・ネガティブコントロールで Change eosinophilic・granular
+  eosinophilic・Single cell necrosis の好成績はバッチ由来と判明。**融合壊死(`Necrosis`)
+  と髄外造血はこの拡張後も本物の弱点**。中核仮説(代表パッチ→類似パッチ検索)は
+  「機能する所見」については成立しており、成果物トラックの glycogen・ground glass も
+  ここに含まれる。
 - **区切りをつけた路線(いずれもbest_rankの低迷を解消しない)**: IVFクラスタリング仮説、
   手動ROIクロップ、染色正規化(クエリ側・コーパス側・per-tile交絡なしまで、4回検証)、
   倍率自動補正。
 - **アトラスGT比較の位置づけ**: アトラス図版をクエリにする
   `scripts/validate_against_ground_truth.py` のbest_rankが悪いカテゴリの主因は、
   モデルの表現力ではなく **アトラス→TG-GATEsのドメインギャップ + 図版が所見と無関係な
-  組織だらけ**(タイル選択バイアス、下記参照)であることが自己検索診断で切り分けられた。
-  今後の定量評価は自己検索診断のほうが交絡が少なく所見カバレッジも広い(7 → 16所見)。
+  組織だらけ**(タイル選択バイアス、下記参照)である可能性が高い。ただし Kupfferは
+  コーパス内スライドが1化合物しかなく自己検索で天井を測れないため、ドメインギャップ説の
+  直接的な裏付けは無い(下記「自己検索診断」発見5)。今後の定量評価は自己検索診断のほうが
+  交絡が少なく所見カバレッジも広い(7 → 16所見)が、バッチ交絡には引き続き注意。
 - **未解決**: アトラス図版のドメインギャップの詰め方、融合壊死・髄外造血の表現
   (uni v2等)。「今後やること」参照。
 
@@ -60,9 +67,11 @@ Ground truth比較(`scripts/validate_against_ground_truth.py`)のクエリ画像
   ものであり、人手でROIを切り出した場合の性能上限を示すものではない。best_rankが悪い
   カテゴリ(例: Kupffer細胞増殖 best_rank=124、封入体 best_rank=14〜297)は、モデルや
   検索アルゴリズムの限界だけでなく、クエリ画像に占める「所見と無関係なタイル」の割合が
-  高いことも一因である可能性が高い。**2026-09-04の自己検索診断で、実際にKupffer等の
-  低迷はモデルの表現力ではなくこのドメインギャップ/ROI問題が主因と切り分けられた
-  (下記「自己検索診断」参照)。交絡の少ない定量評価が必要ならそちらを使う。**
+  高いことも一因である可能性が高い。**自己検索診断(2026-09-04、2026-09-08拡張)は
+  common な肝所見の多くがコーパス内で自己検索できることを示したが、Kupfferはコーパス内
+  1化合物のため天井を測れず、この低迷がドメインギャップ由来という切り分けはできていない
+  (下記「自己検索診断」参照)。交絡の少ない定量評価が必要ならそちらを使うが、
+  バッチ交絡には注意。**
 - Ground truthとしている所見自体(`data/processed_csv/single_finding_liver.csv`)は1000スライド
   コーパスの一部にしか対応しない。NNLの26カテゴリのうち、1000スライドコーパス内に
   確定ラベル付きスライドが1件でもあるのは7カテゴリのみ(Hypertrophy/Necrosis/
@@ -78,9 +87,10 @@ Ground truth比較(`scripts/validate_against_ground_truth.py`)のクエリ画像
       検証済みの交絡なし再検証(`experiments/0010`→`0012`→GT比較→`experiments/0013`
       の可視化)まで行い、確定的に棚上げ。詳細は下記「クエリ側染色正規化の再検証」
       「可視化の再検証」参照
-- [ ]  **uni v2など他モデルでの埋め込みを検討する** — ただし2026-09-04の自己検索診断で
-      「uni_v1は大半のcommonな肝所見を検索に足るレベルで表現できている、例外は融合壊死と
-      髄外造血のみ」と判明したため、**全所見のためではなくこの2所見のための調査**として
+- [ ]  **uni v2など他モデルでの埋め込みを検討する** — ただし自己検索診断
+      (2026-09-04、2026-09-08にバッチ交絡対応で拡張)で「uni_v1はバッチ交絡抜きでも
+      5〜6のcommonな肝所見を検索に足るレベルで表現できている、明確な例外は融合壊死と
+      髄外造血」と判明したため、**全所見のためではなくこの2所見のための調査**として
       位置づける。下記「自己検索診断」参照
 - [x]  ~~IVFクラスタリングの粗さが近似検索の精度を下げている可能性の検証~~
       → 2026-08-19、uni_v1で検証済み・否定的な結論。詳細は下記「IVFクラスタリング
@@ -98,8 +108,9 @@ Ground truth比較(`scripts/validate_against_ground_truth.py`)のクエリ画像
       近いパッチが無く`sim=0.33`止まり)。一方、per-tile Macenkoが好塩基性局所所見
       (髄外造血)のタイル識別を明確に改善することが判明。下記「可視化の再検証」参照
 - [x]  ~~抽出できる所見・できない所見を精査する(第一歩: 自己検索でモデル天井を測る)~~
-      → 2026-09-04、`scripts/self_retrieval_diagnostic.py`。16所見中10所見は検索天井が
-      十分、融合壊死と髄外造血が例外、と判明。詳細は下記「自己検索診断」参照
+      → 2026-09-04 実施、2026-09-08 にバッチ交絡対応で拡張。
+      `scripts/self_retrieval_diagnostic.py`。バッチ交絡抜きで検索天井が十分なのは
+      5〜6所見、融合壊死と髄外造血が本物の例外、と判明。詳細は下記「自己検索診断」参照
 - [~]  **「機能する所見」でデータベース化のワークフローを一度通す**
       → 2026-09-04、`experiments/0014`(アトラス seed)/`0015`(TG-GATEs スライド seed)に着手。
       アトラス seed はドメインギャップで不成立、TG-GATEs seed は glycogen で機能・mitosis は
@@ -254,7 +265,8 @@ top_slides = patch_index.search_top_slides_multi(query_vecs, top_n_slides=20)  #
   (類似度しきい値・スライド内NMS・スライド上限・ラウンドロビン・空白除外・切り出し・manifest)
 - `scripts/validate_against_ground_truth.py` — 新しいパイプライン案をNNLアトラス由来GTで検証するツール
 - `scripts/self_retrieval_diagnostic.py` — コーパス内leave-one-out自己検索でモデル/コーパスの
-  検索天井を測る(2026-09-04、アトラス図版を使わない・GPU不要。詳細は下記「自己検索診断」参照)
+  検索天井を測る(2026-09-04、2026-09-08にバッチ交絡対応で拡張。アトラス図版を使わない・
+  GPU不要。詳細は下記「自己検索診断」参照)
 - `scripts/select_average_patch.py` — 染色正規化用の「典型的な」基準パッチを選ぶ(セットアップ用、実行済み)
 - `scripts/manual_roi_crop_diagnostic.py` — 手動ROIクロップの性能上限測定(2026-08-20、詳細は下記参照)
 - `scripts/torchstain_query_normalization_diagnostic.py` — torchstainベースのクエリ側染色
@@ -555,7 +567,7 @@ distinctiveに表現していない。
 
 出力: `outputs/0013_20260904_query_demo_macenko_per_tile/`(gitignore対象、NFS上に残置)。
 
-## 自己検索診断: モデル/コーパスの検索天井(scripts/self_retrieval_diagnostic.py、2026-09-04)
+## 自己検索診断: モデル/コーパスの検索天井(scripts/self_retrieval_diagnostic.py、2026-09-04、2026-09-08拡張)
 
 NNLアトラス図版をクエリにするGT比較は、「UNI埋め込みが同一所見のパッチを近くに置けて
 いるか」と「アトラス→TG-GATEsのドメインギャップ・図版が所見と無関係な組織だらけ・
@@ -564,50 +576,82 @@ NNLアトラス図版をクエリにするGT比較は、「UNI埋め込みが同
 自己検索でモデル/コーパスの天井を測った**。`single_finding_liver.csv` の確定単一所見
 スライド(コーパス内126枚、≥2枚ある16所見)について、各スライドを順にクエリにし
 (自身のパッチ特徴量をh5からそのまま読む — UNIエンコーダは呼ばない、GPU不要)、
-索引検索してクエリスライドを除外し、同一所見の他スライドが何位に来るかを記録
-(`outputs/gt_validations/self_retrieval_diagnostic.csv`、job 9664、約16分)。
+索引検索してクエリスライドを除外し、同一所見の他スライドが何位に来るかを記録する。
 
-### 発見1: 大半の所見は検索に足る天井を持つ
+**2026-09-08、化合物/実験バッチ交絡の扱いを一級の懸念に格上げして拡張(commit f735fc7、
+job 10440、約19分)。** TG-GATEsは1 study(`EXP_ID`)= 1化合物のタイムコース1本で、
+同一 study の2枚は所見に関係なく化合物・染色/スキャンバッチ・動物系統・固定条件を
+共有するため似て見える。従来の同群除外(`EXP_ID`+`GROUP_ID` = 用量+時点完全一致のみ)
+では弱い。拡張版が追加した列(`outputs/gt_validations/self_retrieval_diagnostic.csv`):
+  - `n_compounds` / `n_exp_ids` — その所見のコーパス内スライドが跨がる distinct 化合物/
+    study 数。**≤2 なら「所見 vs 化合物」を原理的に分離不能**。
+  - `*_best_rank_med_noexp` / `nhr_hit@50_noexp` — 同一 study を丸ごと除外した best_rank。
+  - `batch_dominates_finding_rate` — 各クエリで「同一 study・別所見」のスライドを
+    ランキングし、その best_rank が「同一所見・別 study」ターゲット以上に上位だった
+    クエリの割合。**高ければ検索は所見ではなくバッチを追っている。**
 
-16所見中10所見が、chance(ランダム期待順位)を大きく上回るbest_rankかつ hit@50 ≥ 0.75:
-Microgranuloma(best_rank中央値2/chance 62)、Change eosinophilic(3/91)、Swelling(4/143)、
-Deposit glycogen(4.5/167)、Ground glass appearance(3.5/250)、Cellular infiltration(8/143)
-など。**アトラスGT比較で悪かった所見(Kupffer best 202、Inclusion body 480)は、モデルが
-表現できないからではない** — Kupfferは自己検索でrank 1(ただしn=2・同群、下記注意)。
-主因はアトラスのドメインギャップ側にある。
+### 発見1: バッチで説明できない天井を持つのは 5〜6所見(従来「10所見」は過大評価)
 
-### 発見2: 凝固/融合壊死は本物の弱点
+同一 study 除外(`_noexp`)後も chance(random_best_rank)を明確に上回り、
+`batch_dominates_finding_rate` が低いのは: **Microgranuloma**(noexp best 12 / chance 62、
+hit@50 0.7)、**Cellular infiltration**(10 / 143、1.0)、**Swelling**(8 / 143、1.0)、
+**Deposit, glycogen**(21 / 167、1.0)、**Ground glass appearance**(17.5 / 250、1.0)。
+Increased mitosis(60 / 100、0.4)は境界線。**成果物トラックの2所見(glycogen・
+ground glass)はここに残った** — deliver した137枚/113枚の妥当性を損なう結果ではない。
 
-`Necrosis`(13枚)は自己検索でもbest_rank中央値49(chance 77)、hit@50 0.5 —
-ほぼchance並み。0013の`sim=0.33`(コーパスに近いパッチが無い)と整合し、**融合壊死は
-UNI空間でクラスタを形成しない**。一方 `Single cell necrosis`(best_rank 16.5、hit@50 0.75)
-はまだマシ。**壊死サブタイプで挙動が違い、`validate_against_ground_truth.py` の
-`CATEGORIES` がアトラス "Necrosis" を `"Single cell necrosis"` にマッピングしていたのは
-apples-to-orangesだった。** `Hematopoiesis, extramedullary`(best_rank 125、hit@50 0.33、
-n=3)も実質失敗。
+### 発見2: 「良い数字」がバッチ由来だった所見
 
-### 発見3: n_hits_ratioソートはmax_similarityソートより優れている
+- **Change, eosinophilic**: best_rank 3 → 51(同群除外)→ **136.5(同一 study 除外、
+  chance 91 より悪い)**、hit@50 1.0 → 0.2、`batch_dominates` 0.5。所見類似ではなく
+  実験群類似だった。
+- **Degeneration, granular, eosinophilic**: コーパス内 **2化合物・2 study のみ**。
+  自己検索の "best_rank 1" は、同一 study・別所見スライドが**常に(4/4)**上位に来る =
+  100% バッチ。README「所見の3クラス分け」で既に「候補の93%が背景・天井0.894・
+  成果物にならない見込み」としていた所見で、自己検索の数字も当てにならなかった。
+- **Single cell necrosis**: 全ターゲットでの best_rank 16.5、同一 study 除外後も 45.5
+  とマシに見えるが、`batch_dominates` 1.0(3/3)= 同一 study・別所見スライドが常に
+  上位に来るので、その "マシ" はバッチ駆動である可能性が高い。なお
+  `validate_against_ground_truth.py` の `CATEGORIES` がアトラス "Necrosis" を
+  `"Single cell necrosis"` にマッピングしていたのが apples-to-oranges だった点は変わらない。
+
+### 発見3: 融合壊死・髄外造血は本物の弱点(結論維持・補強)
+
+`Necrosis`(13枚、11化合物)は同一 study 除外後も best_rank 49.5(chance 77)、
+`batch_dominates` 0.0。多様な化合物でも駄目 = **融合壊死はUNI空間でクラスタを形成しない**
+(0013の`sim=0.33`と整合)。`Hematopoiesis, extramedullary`(3枚、best 125、除外しても
+不変)も同様。`Hypertrophy`(25枚、14化合物)は同一 study 除外後 best 61.5 で **chance
+(40)より悪い** — 多様な化合物なのでバッチ由来ではなく、「相対基準を要する」所見の
+性質(README「所見の3クラス分け」)。
+
+### 発見4: n_hits_ratioソートはmax_similarityソートより優れている
 
 ほぼ全所見で `nhr_best_rank ≤ sim_best_rank`(Single cell necrosis 16.5 vs 125、
 Deposit glycogen 4.5 vs 26.5 等)。0013発見2の「n_hits_ratioとmax_similarityが乖離する」は
 本物だが、**現行の既定(n_hits_ratio)が良い側**。集計指標をmax_similarityに変える案は
 この診断で否定された。
 
-### 発見4: バッチ効果の注意
+### 発見5: コーパス内1化合物の所見は自己検索では評価不能
 
-`Change, eosinophilic` は同群(同一 EXP_ID+GROUP_ID = 同一化合物・用量・時点)スライドを
-除外するとbest_rank 3 → 51 に悪化。「良い」数字の一部は所見類似ではなく実験群類似。
-`n=2` の所見(Kupffer、Alteration cytoplasmic)は2枚が同群で、除外すると対象0 = 評価不能。
+`Proliferation, Kupffer cell` / `Alteration, cytoplasmic` / `Lesion,NOS` はコーパス内
+**1化合物・1 study**(`_noexp` 列が空)。**Kupfferの「自己検索でrank 1 → モデルは
+表現できている」という従来の主張は撤回** — n=2 が同一 study の同一化合物なので、
+自己検索は何も言えていない。アトラスGT比較でのKupffer低迷をドメインギャップに
+帰属する他の状況証拠はあるが、この診断はもう根拠にならない。
 
 ### 結論
 
-- **UNI(uni_v1)+ 現行コーパスは、大半の common な肝所見を検索に足るレベルで表現できて
-  いる。** プロジェクトの中核仮説(代表パッチ→類似パッチ検索)はこれらの所見については成立。
-- **例外は融合壊死と髄外造血** — これらだけは表現の限界で、uni v2 等の検討が正当化される
-  (全所見のためではなく、この2所見のため)。
+- **UNI(uni_v1)+ 現行コーパスがバッチ交絡抜きで「検索に足る」と示せたのは 5〜6所見**
+  (Microgranuloma / Cellular infiltration / Swelling / Deposit glycogen / Ground glass、
+  Increased mitosis は境界)。中核仮説はこれらについては成立。**特に成果物トラックの
+  glycogen・ground glass は無事。**
+- **融合壊死と髄外造血は表現の限界**(結論維持・補強)。uni v2 等の検討はこの2所見のため。
+- **Change eosinophilic / granular eosinophilic / Single cell necrosis の「良い数字」は
+  バッチ由来**。granular は他の証拠と合わせて成果物にならない見込み。
+- **Kupfferの天井は自己検索では測れない**(コーパス内1化合物)。
 - 現行の検索パス(n_hits_ratioソート)は妥当。集計指標の変更は不要。
-- 今後の定量評価では、アトラスGT比較よりこの自己検索診断のほうが交絡が少なく所見カバレッジも
-  広い(7 → 16所見)。ただし n=2〜3 の所見とバッチ効果には注意。
+- 今後の定量評価では、アトラスGT比較よりこの診断のほうが交絡は少ないが、**万能ではない**:
+  n≤3 の所見、コーパス内化合物数 ≤2 の所見、`batch_dominates_finding_rate` が高い所見は
+  信用しないこと。
 
 ## 成果物の試作: 所見ごとの代表パッチ集(experiments/0014 / 0015、2026-09-04〜09-05)
 
@@ -910,6 +954,41 @@ uni_v2 での再埋め込み(1000スライド分の GPU 推論)とはコスト�
 上の表の `?` は未検証を示す。fatty change と ground glass は whole-patch テクスチャに
 見えるが、hypertrophy で「見た目の分類だけでは当てにならない」ことが分かったので、
 0015 + ランダム対照を通すまでは確定させない。
+
+## experiments/0016: クエリ埋め込み経路は 0014 の結論の交絡か(2026-09-07、job 10434)
+
+0014 は「アトラス図版をクエリにすると GT スライドを引けない → アトラス→TG-GATEs の
+ドメインギャップが #1 ブロッカー」と結論したが、0014 の atlas アームと
+self_retrieval_diagnostic / 0015 の TG-GATEs アームは2軸で違っていた: (1) 内容/ドメイン、
+(2) クエリ経路(画像 → `lib.query_embedding.embed_image(_tiles)` のタイル分割・LANCZOS
+リサイズ・空白フィルタ vs h5 特徴量の直読み)。0016 は (2) を単独で測る — コーパスに
+既にあるパッチを使えばドメインギャップは構成上ゼロになる。glycogen と ground glass
+(検証済みの2所見)で3 tier:
+
+- **Tier 1 (roundtrip)**: GT スライドのパッチを raw WSI から `crop_patch` → `embed_image`
+  で再埋め込みし、保存済み h5 ベクトルと比較。**cos_self 中央値 1.0 / min 0.99998**
+  (これらのスライドは patch_size_level0=224 で `crop_patch` がリサイズ不要のため実質
+  同一ピクセル)。再埋め込みベクトルでの検索(自パッチ rank / 自スライド rank / 同一所見
+  他 GT スライドの recall)は **feature アームと完全一致**。
+- **Tier 2 (patchset)**: 同一 seed パッチ集合で 0015 validate を h5 seed / 画像経路 seed の
+  2通り実行。glycogen・ground glass とも **両アーム完全一致**(同じ寄与スライド・同じ
+  150パッチ・同じ hold-out GT recall。`feature_only` / `image_only` ともゼロ)。
+- **Tier 3 (region)**: GT スライドから 14×14 パッチ(~196タイル)の level-0 リージョンを
+  切り出し `embed_image_tiles` で検索 = 「アトラス図版と同じ ROI なし多タイル集約」を
+  ドメイン内・倍率一致で再現。**全リージョンが自スライドを rank 1 で retrieve**、
+  他 GT スライドも target hit@10 0.67〜0.75 / hit@50 0.88〜1.0。
+
+**結論**: クエリ埋め込み経路(`embed_image` / `embed_image_tiles`・タイル分割・リサイズ・
+空白フィルタ・多タイル集約)は 0014 の結論の意味ある交絡ではない。ドメイン内ピクセルを
+正しい倍率で与えれば、画像経路は h5 直読みと同等に検索できる。したがって 0014 の
+「アトラス図版で GT スライドを引けない」失敗は**アトラス図版そのもの**(別スキャナ・
+染色・倍率、図版が非所見組織だらけ、ROI なし)に帰属でき、ツーリングの副作用ではない。
+「ドメインギャップが #1 ブロッカー」は補強された。
+
+ストレージ注: 0016 / 0013 とも exact re-rank の h5 ランダムアクセスが高頻度なので、
+`run_slurm.sh` の `PRE_NATIVE_COMMAND` で index + h5 をノードローカル NVMe にステージ
+してから読む(`PVS_INDEX_DIR` / `PVS_FEATURES_DIR` 等)。`USE_LOCAL_SSD_INPUT=1` は
+`data/`(844G)全体を rsync するので使わない(job 10421 はこれで TIMEOUT した)。
 
 ## 次の一手(成果物トラック)
 

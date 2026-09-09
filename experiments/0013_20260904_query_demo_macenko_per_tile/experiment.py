@@ -3,10 +3,14 @@ import json
 import logging
 import os
 import re
+import shutil
 import sys
+import traceback
 from pathlib import Path
 
 import yaml
+
+_IMG_EXTS = {".jpg", ".jpeg", ".png"}
 
 
 def _get_project_root() -> Path:
@@ -45,38 +49,351 @@ def load_config(exp_dir: Path) -> dict:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Embed one or more --image reference images (tiled, auto-scaled to the "
-        "corpus's apparent magnification) and search the patch index for similar patches / WSIs."
+        description="Embed one or more reference images (tiled, per-tile Macenko-normalized "
+        "when config.stain_reference_per_tile is set) and search the patch index for similar "
+        "patches / WSIs. Accepts a single query (--image), one folder aggregated into one "
+        "query (--image-dir), or a parent folder whose every subfolder becomes its own "
+        "aggregated query (--atlas-root)."
     )
     parser.add_argument("--config", type=str, default="config.yml")
-    parser.add_argument(
-        "--image", type=str, required=True, nargs="+",
-        help="Path(s) to the query image(s). Multiple reference images for the same finding "
-        "are aggregated by taking each tile's best match, not by averaging their vectors "
-        "(see lib.search.PatchIndex.search_similar_patches_multi / search_top_slides_multi).",
+    src = parser.add_mutually_exclusive_group(required=True)
+    src.add_argument(
+        "--image", type=str, nargs="+",
+        help="Path(s) to the query image(s). Multiple images are aggregated by taking each "
+        "tile's best match, not by averaging vectors (see search_similar_patches_multi / "
+        "search_top_slides_multi).",
+    )
+    src.add_argument(
+        "--image-dir", type=str,
+        help="A folder of query images (non-recursive). Every *.jpg/*.jpeg/*.png in it is "
+        "aggregated into a single query, the same way multiple --image paths are.",
+    )
+    src.add_argument(
+        "--atlas-root", type=str,
+        help="A parent folder (e.g. data/query/Nonneoplastic-Lesion-Atlas-...). Each immediate "
+        "subfolder is treated as one finding and its images aggregated into one query, so a "
+        "single run sweeps the whole atlas. With --per-image, every image file (recursively) "
+        "becomes its own query instead. Per-query runs use the completed-guard, so a re-run "
+        "resumes where it stopped.",
     )
     parser.add_argument(
-        "--stain_reference",
-        type=str,
-        default=None,
-        help="Optional path to a reference patch (e.g. one of "
-        "outputs/average_patch_candidates/*.png); if given, every --image is "
-        "Macenko stain-normalized against it before embedding. Not a safe "
-        "default — see lib.query_embedding.embed_image's docstring.",
+        "--per-image", action="store_true",
+        help="With --atlas-root: one query (one run_dir) per image file, not per subfolder.",
     )
     parser.add_argument(
-        "--auto_scale",
-        action="store_true",
-        help="NOT RECOMMENDED. Apply FM-centroid magnification matching (per-tile vote, see "
-        "lib.mpp_estimation.estimate_relative_scale_fm_tiled's docstring) before tiling. Visually "
-        "this stops the blurring an earlier whole-image-downsize version caused, but a 7-category "
-        "ground-truth comparison (see lib.query_embedding.embed_image_tiles_auto_scale's "
-        "docstring) found it was the single best option in 0 of 7 categories — plain tiling with "
-        "no correction won 3/7, and combining this with --stain_reference was worse than either "
-        "alone in most categories. Looking cleaner is not the same as retrieving better. Off by "
-        "default for this reason, not just caution.",
+        "--stain_reference", type=str, default=None,
+        help="Optional path to a reference patch; if given, every image is Macenko "
+        "stain-normalized against it before embedding (whole-image, before tiling). Not a safe "
+        "default — see lib.query_embedding.embed_image's docstring. Note this is distinct from "
+        "config.stain_reference_per_tile, which normalizes each tile after cropping.",
+    )
+    parser.add_argument(
+        "--auto_scale", action="store_true",
+        help="NOT RECOMMENDED. FM-centroid magnification matching before tiling (per-tile vote). "
+        "A 7-category ground-truth comparison found it was the single best option in 0 of 7 "
+        "categories. Off by default for that reason, not just caution.",
+    )
+    parser.add_argument(
+        "--no-galleries", action="store_true",
+        help="Skip the real-resolution patch galleries (lib.visualize.plot_hit_patch_gallery), "
+        "which are the only step that opens raw WSI files (data/moo_collected_tggate_wsi, ~600 GB, "
+        "not staged to local SSD). Use this for a whole-atlas sweep: tile-score heatmaps, "
+        "top_slides.csv, similar_patches.csv and the thumbnail overlays are still produced.",
+    )
+    parser.add_argument(
+        "--overwrite", action="store_true",
+        help="Re-run query sets even if their run_dir is already marked completed (clears the "
+        "completion.json guard first). Use when re-running a finished sweep to add galleries.",
     )
     return parser.parse_args()
+
+
+def _slug(s: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_-]", "_", s).strip("_")
+
+
+def _dir_images(d: Path) -> list[str]:
+    return sorted(str(p) for p in d.iterdir() if p.suffix.lower() in _IMG_EXTS)
+
+
+def resolve_query_sets(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
+    """-> [(variant_stem, [image_path, ...]), ...]. variant_stem feeds variant_key."""
+    if args.atlas_root:
+        root = Path(args.atlas_root)
+        if not root.is_dir():
+            raise SystemExit(f"--atlas-root {root} is not a directory")
+        if args.per_image:
+            imgs = sorted(str(p) for p in root.rglob("*") if p.suffix.lower() in _IMG_EXTS)
+            if not imgs:
+                raise SystemExit(f"--atlas-root {root} has no images")
+            # 'atlas_img__' prefix so run_slurm.sh's WSI-staging glob can target
+            # exactly these per-image runs.
+            return [(_slug("atlas_img__" + Path(p).stem)[:120], [p]) for p in imgs]
+        sets = []
+        for sub in sorted(p for p in root.iterdir() if p.is_dir()):
+            imgs = _dir_images(sub)
+            if imgs:
+                sets.append((_slug(sub.name)[:120], imgs))
+        if not sets:
+            raise SystemExit(f"--atlas-root {root} has no subfolder with images")
+        return sets
+    if args.image_dir:
+        d = Path(args.image_dir)
+        if not d.is_dir():
+            raise SystemExit(f"--image-dir {d} is not a directory")
+        imgs = _dir_images(d)
+        if not imgs:
+            raise SystemExit(f"--image-dir {d} has no {sorted(_IMG_EXTS)} files")
+        return [(_slug(d.name)[:120], imgs)]
+    stems = [_slug(Path(p).stem) for p in args.image]
+    return [("+".join(stems)[:120], list(args.image))]
+
+
+def stage_wsi_hybrid(project_root: Path, scratch_dir: str, exp_name: str, top_n: int, logger) -> Path | None:
+    """Build ${scratch_dir}/staged_wsi: a symlink to every corpus .svs (so any
+    slide a gallery asks for resolves) with the top `top_n` slides from prior
+    atlas top_slides.csv replaced by real local copies. Best-effort — any failure
+    logs and returns None so the caller keeps reading WSI from NFS.
+
+    Done here rather than in run_slurm.sh's PRE_NATIVE_COMMAND because that runs
+    under `set -euo pipefail` + an ERR trap where an unmatched glob aborted the
+    whole job (see git history: jobs 10437/10438)."""
+    src = project_root / "data/moo_collected_tggate_wsi/raw_wsi"
+    dst = Path(scratch_dir) / "staged_wsi"
+    try:
+        import pandas as pd
+
+        dst.mkdir(parents=True, exist_ok=True)
+        n_link = 0
+        for svs in src.glob("*.svs"):
+            link = dst / svs.name
+            if not link.exists():
+                link.symlink_to(svs)
+                n_link += 1
+        ids: set[str] = set()
+        for csv in sorted((project_root / "outputs" / exp_name).glob("query__*__pertilenorm/top_slides.csv")):
+            try:
+                ids.update(pd.read_csv(csv)["slide_id"].astype(str).head(top_n))
+            except Exception:
+                pass
+        n_real = 0
+        for sid in sorted(ids):
+            s = src / f"{sid}.svs"
+            if not s.exists():
+                continue
+            try:
+                tmp = dst / f".{sid}.svs.tmp"
+                shutil.copy2(s, tmp)
+                tmp.replace(dst / f"{sid}.svs")
+                n_real += 1
+            except Exception as e:
+                logger.warning(f"WSI stage: copy {sid} failed: {e!r}")
+        n_total = len(list(dst.glob("*.svs")))
+        logger.info(
+            f"WSI stage -> {dst}: {n_total} slides ({n_link} new symlinks, {n_real} real "
+            f"local copies of top-{top_n} slides from {len(ids)} prior-run ids)"
+        )
+        return dst if n_total else None
+    except Exception as e:
+        logger.warning(f"WSI staging failed ({e!r}); galleries will read WSI from NFS")
+        return None
+
+
+def _staged_or(project_root: Path, config_rel: str, env_var: str, logger=None) -> Path:
+    """A data path, preferring a local-SSD staged copy (env_var, set by
+    run_slurm.sh's PRE_NATIVE_COMMAND) over the NFS original under project_root.
+
+    The search path (FAISS index + per-slide .h5 feature files) is read at high
+    frequency during exact re-ranking, so it must not sit on NFS during compute
+    — see the storage policy in run_slurm.sh.
+    """
+    staged = os.environ.get(env_var)
+    if staged and Path(staged).exists():
+        if logger:
+            logger.info(f"  {env_var}: using staged copy {staged}")
+        return Path(staged)
+    return project_root / config_rel
+
+
+def _completed(*dirs: Path) -> bool:
+    """True if any of these dirs holds a completion.json with status 'completed'.
+    Checked before get_run_dir (whose own guard sys.exit(0)s on a completed
+    canonical dir, which would kill the whole atlas loop) — so a re-run resumes
+    where it stopped. Both the canonical outputs/ dir and the scratch
+    OUTPUT_ROOT copy are checked, since the latter is only synced back at job end.
+    """
+    for d in dirs:
+        f = d / "completion.json"
+        if not f.exists():
+            continue
+        try:
+            if json.loads(f.read_text()).get("status") == "completed":
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def process_query_set(
+    *,
+    variant_stem: str,
+    images: list[str],
+    project_root: Path,
+    exp_name: str,
+    output_root: str | None,
+    patch_index,
+    tile_transform,
+    centroids,
+    args: argparse.Namespace,
+    params: dict,
+    plot_fns: dict,
+) -> None:
+    from lib.output_utils import complete_run, get_run_dir, write_run_metadata
+    from lib.query_embedding import embed_image_tiles, embed_image_tiles_auto_scale
+
+    import numpy as np
+
+    variant_key = "query__" + variant_stem
+    if args.stain_reference:
+        variant_key += f"__norm-{_slug(Path(args.stain_reference).stem)}"
+    if params["stain_reference_per_tile"]:
+        variant_key += "__pertilenorm"
+    if args.auto_scale:
+        variant_key += "__autoscale"
+
+    canonical_dir = project_root / "outputs" / exp_name / variant_key
+    check_dirs = [canonical_dir]
+    if output_root:
+        check_dirs.append(Path(output_root) / exp_name / variant_key)
+    if args.overwrite:
+        for d in check_dirs:
+            (d / "completion.json").unlink(missing_ok=True)
+    elif _completed(*check_dirs):
+        print(f"skip (already completed): {variant_key}")
+        return
+
+    run_dir = get_run_dir(project_root, __file__, variant_key, output_root=output_root)
+    logger = setup_logger(run_dir, f"{exp_name}:{variant_key}")
+
+    write_run_metadata(
+        run_dir, exp_name=exp_name, variant_key=variant_key, image=images,
+        stain_reference=args.stain_reference,
+        stain_reference_per_tile=params["stain_reference_per_tile"],
+        auto_scale=args.auto_scale, no_galleries=args.no_galleries,
+    )
+    logger.info(f"Starting: {exp_name} / {variant_key}")
+    logger.info(f"images ({len(images)}): {images}")
+
+    tile_size = params["tile_size"]
+    nprobe = params["nprobe"]
+    rerank_pool = params["rerank_pool"]
+    max_tiles_reranked = params["max_tiles_reranked"]
+
+    all_tiles = []
+    scale_info = []
+    for image_path in images:
+        if centroids is not None:
+            tiles, scale, debug = embed_image_tiles_auto_scale(
+                image_path, centroids, tile_size=tile_size, stain_reference=args.stain_reference
+            )
+            logger.info(
+                f"  {image_path}: auto-scaled by {scale}x "
+                f"(median_unclipped={debug['median_scale_unclipped']}, n_kept={debug['n_kept']}/{debug['n_tiles']})"
+            )
+            scale_info.append({"image": image_path, "scale_factor": scale, "debug": debug})
+        else:
+            tiles = embed_image_tiles(
+                image_path, tile_size=tile_size, stain_reference=args.stain_reference,
+                tile_transform=tile_transform,
+            )
+            scale_info.append({"image": image_path, "scale_factor": 1.0, "similarities": None})
+        logger.info(f"  {image_path}: {tiles.shape[0]} tiles")
+        all_tiles.append(tiles)
+    query_vecs = np.concatenate(all_tiles, axis=0)
+    logger.info(f"total tiles across all images: {query_vecs.shape[0]}")
+
+    # Which tiles get exact-reranked depends only on the raw image + tiling
+    # params, so the heatmap can be drawn right after the index loads. Not
+    # supported under --auto_scale (the heatmap would need the rescaled image).
+    heatmap_dir = run_dir / "tile_score_heatmap"
+    heatmap_dir.mkdir(exist_ok=True)
+    if not args.auto_scale:
+        for image_path in images:
+            heatmap_fig = plot_fns["tile_scores"](
+                image_path, patch_index, tile_size=tile_size, nprobe=nprobe,
+                max_tiles_reranked=max_tiles_reranked, tile_transform=tile_transform,
+            )
+            heatmap_fig.savefig(heatmap_dir / f"{_slug(Path(image_path).stem)}.png", dpi=150)
+            plot_fns["close"](heatmap_fig)
+
+    similar_patches = patch_index.search_similar_patches_multi(
+        query_vecs, k=params["k"], nprobe=nprobe, rerank_pool=rerank_pool,
+        max_tiles_reranked=max_tiles_reranked,
+    )
+    similar_patches.to_csv(run_dir / "similar_patches.csv", index=False)
+    logger.info(f"top similar patches:\n{similar_patches}")
+
+    top_slides = patch_index.search_top_slides_multi(
+        query_vecs, k_candidates=params["k_candidates"], nprobe=nprobe,
+        top_n_slides=params["top_n_slides"],
+    )
+    top_slides.to_csv(run_dir / "top_slides.csv", index=False)
+    logger.info(f"top slides (reverse lookup):\n{top_slides}")
+
+    plots_dir = run_dir / "thumbnail_plots"
+    plots_dir.mkdir(exist_ok=True)
+    gallery_dir = run_dir / "patch_gallery"
+    gallery_dir.mkdir(exist_ok=True)
+    # See the long note in git history: k=rerank_pool (not k=k) so every plotted
+    # slide is scored by the same exact-similarity rule; slides with zero rows
+    # here are skipped rather than back-filled from an unbounded pool.
+    hit_pool = patch_index.search_similar_patches_multi(
+        query_vecs, k=rerank_pool, nprobe=nprobe, rerank_pool=rerank_pool,
+        max_tiles_reranked=max_tiles_reranked,
+    )
+    n_gal = 0
+    for slide_id in top_slides["slide_id"].head(params["top_n_slides_to_plot"]):
+        hits = hit_pool[hit_pool["slide_id"] == slide_id]
+        if hits.empty:
+            continue
+        try:
+            fig = plot_fns["thumbnail"](slide_id, hits, params["thumbnails_dir"], patch_index.slide_meta)
+            fig.savefig(plots_dir / f"{slide_id}.png", dpi=150)
+            plot_fns["close"](fig)
+        except Exception as e:
+            logger.warning(f"thumbnail plot failed for slide {slide_id}: {e!r}")
+
+        if not args.no_galleries:
+            try:
+                gallery_fig = plot_fns["gallery"](hits, params["raw_slide_dir"], patch_index.slide_meta)
+                gallery_fig.savefig(gallery_dir / f"{slide_id}.png", dpi=150)
+                plot_fns["close"](gallery_fig)
+                n_gal += 1
+            except Exception as e:
+                # e.g. the slide's .svs is not in a partial PVS_RAW_SLIDE_DIR stage
+                logger.warning(f"gallery failed for slide {slide_id}: {e!r}")
+    if not args.no_galleries:
+        logger.info(f"galleries written: {n_gal}")
+
+    results = {
+        "image": images,
+        "stain_reference": args.stain_reference,
+        "stain_reference_per_tile": params["stain_reference_per_tile"],
+        "auto_scale": args.auto_scale,
+        "no_galleries": args.no_galleries,
+        "scale_info": scale_info,
+        "n_tiles": int(query_vecs.shape[0]),
+        "n_similar_patches": int(len(similar_patches)),
+        "n_top_slides": int(len(top_slides)),
+        "similar_patches_path": str(run_dir / "similar_patches.csv"),
+        "top_slides_path": str(run_dir / "top_slides.csv"),
+        "thumbnail_plots_dir": str(plots_dir),
+        "patch_gallery_dir": str(gallery_dir),
+        "tile_score_heatmap_dir": str(heatmap_dir),
+    }
+    (run_dir / "results.json").write_text(json.dumps(results, indent=2, ensure_ascii=False))
+    complete_run(run_dir)
+    logger.info(f"Done. {variant_key}")
 
 
 def main() -> None:
@@ -84,12 +401,15 @@ def main() -> None:
     sys.path.insert(0, str(project_root))
 
     from lib.mpp_estimation import load_scale_centroids
-    from lib.output_utils import complete_run, get_run_dir, write_run_metadata
-    from lib.query_embedding import embed_image_tiles, embed_image_tiles_auto_scale
     from lib.search import PatchIndex
-    from lib.visualize import plot_hit_patch_gallery, plot_query_tile_scores, plot_slide_hits_on_thumbnail
+    from lib.visualize import (
+        plot_hit_patch_gallery,
+        plot_query_tile_scores,
+        plot_slide_hits_on_thumbnail,
+    )
 
-    import numpy as np
+    import matplotlib.pyplot as plt
+    import numpy as np  # noqa: F401 - kept for parity / downstream imports
 
     exp_name = os.environ["EXP_NAME"]
     output_root = os.environ.get("OUTPUT_ROOT")
@@ -97,63 +417,29 @@ def main() -> None:
     args = parse_args()
     config = load_config(Path(__file__).parent)
 
-    # Each distinct set of query images gets its own run_dir/completion guard.
-    image_stems = [re.sub(r"[^A-Za-z0-9_-]", "_", Path(p).stem) for p in args.image]
-    variant_key = "query__" + "+".join(image_stems)[:120]
-    if args.stain_reference:
-        ref_stem = re.sub(r"[^A-Za-z0-9_-]", "_", Path(args.stain_reference).stem)
-        variant_key += f"__norm-{ref_stem}"
-    if config.get("stain_reference_per_tile"):
-        variant_key += "__pertilenorm"
-    if args.auto_scale:
-        variant_key += "__autoscale"
+    # Data paths: prefer a local-SSD staged copy over the NFS original for the
+    # search path and thumbnails (staged by run_slurm.sh's PRE_NATIVE_COMMAND).
+    # raw_slide_dir (~600 GB) can't be staged wholesale; --no-galleries avoids it
+    # entirely, but for a galleries run PVS_RAW_SLIDE_DIR can point at a dir
+    # holding just the few dozen top-slide .svs the galleries actually open
+    # (galleries are the only raw-WSI reader; each finding plots top_n_slides_to_plot).
+    index_exp_dir = _staged_or(project_root, config["index_exp_dir"], "PVS_INDEX_DIR")
+    features_dir = _staged_or(project_root, config["features_dir"], "PVS_FEATURES_DIR")
+    thumbnails_dir = _staged_or(project_root, config["thumbnails_dir"], "PVS_THUMBNAILS_DIR")
+    raw_slide_dir = _staged_or(project_root, config["raw_slide_dir"], "PVS_RAW_SLIDE_DIR")
+    scale_centroids_path = project_root / config.get("scale_centroids_path", "data/scale_centroids.npz")
 
-    run_dir = get_run_dir(project_root, __file__, variant_key, output_root=output_root)
-    logger = setup_logger(run_dir, exp_name)
-
-    seed: int = config.get("seed", 42)
-    index_exp_dir = project_root / config["index_exp_dir"]
-    features_dir = project_root / config["features_dir"]
     stain_reference_per_tile = config.get("stain_reference_per_tile")
     if stain_reference_per_tile:
         stain_reference_per_tile = project_root / stain_reference_per_tile
-    thumbnails_dir = project_root / config["thumbnails_dir"]
-    raw_slide_dir = project_root / config["raw_slide_dir"]
-    scale_centroids_path = project_root / config.get("scale_centroids_path", "data/scale_centroids.npz")
-    tile_size: int = config.get("tile_size", 224)
-    k: int = config.get("k", 20)
-    nprobe: int = config.get("nprobe", 32)
-    rerank_pool: int = config.get("rerank_pool", 200)
-    max_tiles_reranked: int | None = config.get("max_tiles_reranked", 4)
-    k_candidates: int = config.get("k_candidates", 8000)
-    top_n_slides: int = config.get("top_n_slides", 20)
-    top_n_slides_to_plot: int = config.get("top_n_slides_to_plot", 3)
 
-    write_run_metadata(
-        run_dir,
-        exp_name=exp_name,
-        variant_key=variant_key,
-        image=args.image,
-        stain_reference=args.stain_reference,
-        stain_reference_per_tile=str(stain_reference_per_tile) if stain_reference_per_tile else None,
-        auto_scale=args.auto_scale,
-    )
+    print(f"index_exp_dir: {index_exp_dir}")
+    print(f"features_dir:  {features_dir}")
+    print(f"thumbnails_dir: {thumbnails_dir}")
 
-    logger.info(f"Starting: {exp_name} / {variant_key}")
-    logger.info(f"run_dir:          {run_dir}")
-    logger.info(f"image:            {args.image}")
-    logger.info(f"stain_reference:  {args.stain_reference}")
-    logger.info(f"stain_reference_per_tile: {stain_reference_per_tile}")
-    logger.info(f"auto_scale:       {args.auto_scale}")
-    logger.info(f"index_exp_dir:    {index_exp_dir}")
-    logger.info(f"seed:             {seed}")
+    query_sets = resolve_query_sets(args)
+    print(f"query sets: {len(query_sets)} -> {[s for s, _ in query_sets]}")
 
-    # ── Experiment logic ──────────────────────────────────────────────────────
-    # Per-tile Macenko normalization (matches the corpus side's per-224px-patch
-    # normalization — see scripts/validate_against_ground_truth.py's
-    # _embed_v1_macenko_normalized). Applied to each tile after it is cropped and
-    # resized to tile_size, both for the actual query embedding and for the tile
-    # score heatmap (so the heatmap reflects what was really searched).
     tile_transform = None
     if stain_reference_per_tile:
         from lib.torchstain_normalize import normalize_to_reference
@@ -173,29 +459,7 @@ def main() -> None:
     centroids = None
     if args.auto_scale:
         centroids = load_scale_centroids(scale_centroids_path)
-        logger.info(f"loaded scale centroids: {sorted(centroids.keys())} from {scale_centroids_path}")
-
-    all_tiles = []
-    scale_info = []
-    for image_path in args.image:
-        if centroids is not None:
-            tiles, scale, debug = embed_image_tiles_auto_scale(
-                image_path, centroids, tile_size=tile_size, stain_reference=args.stain_reference
-            )
-            logger.info(
-                f"  {image_path}: auto-scaled by {scale}x (median_unclipped={debug['median_scale_unclipped']}, n_kept={debug['n_kept']}/{debug['n_tiles']})"
-            )
-            scale_info.append({"image": image_path, "scale_factor": scale, "debug": debug})
-        else:
-            tiles = embed_image_tiles(
-                image_path, tile_size=tile_size, stain_reference=args.stain_reference,
-                tile_transform=tile_transform,
-            )
-            scale_info.append({"image": image_path, "scale_factor": 1.0, "similarities": None})
-        logger.info(f"  {image_path}: {tiles.shape[0]} tiles")
-        all_tiles.append(tiles)
-    query_vecs = np.concatenate(all_tiles, axis=0)
-    logger.info(f"total tiles across all images: {query_vecs.shape[0]}")
+        print(f"loaded scale centroids: {sorted(centroids.keys())}")
 
     patch_index = PatchIndex.load(
         index_path=index_exp_dir / "index.faiss",
@@ -204,100 +468,65 @@ def main() -> None:
         features_dir=features_dir,
     )
 
-    # Which of a query image's tiles actually get exact-reranked (and can
-    # therefore ever appear in similar_patches/hit_pool) depends only on
-    # the raw image + tiling params, not on the search results below — so
-    # this can run right after the index loads. Not supported under
-    # --auto_scale (the heatmap would need to reflect the rescaled image,
-    # not the raw one); skipped in that case rather than silently showing
-    # the wrong tiles.
-    heatmap_dir = run_dir / "tile_score_heatmap"
-    heatmap_dir.mkdir(exist_ok=True)
-    if not args.auto_scale:
-        for image_path in args.image:
-            heatmap_fig = plot_query_tile_scores(
-                image_path, patch_index, tile_size=tile_size, nprobe=nprobe,
-                max_tiles_reranked=max_tiles_reranked, tile_transform=tile_transform,
-            )
-            stem = re.sub(r"[^A-Za-z0-9_-]", "_", Path(image_path).stem)
-            heatmap_fig.savefig(heatmap_dir / f"{stem}.png", dpi=150)
+    # Stage the top-slide WSI to local NVMe for the galleries (only reader of raw
+    # WSI). Skipped if --no-galleries, if PVS_RAW_SLIDE_DIR is already set, or if
+    # there's no node-local scratch. Best-effort: on failure, raw_slide_dir stays
+    # on NFS and per-gallery try/except keeps the sweep alive.
+    _mainlog = logging.getLogger("experiment.main")
+    _mainlog.setLevel(logging.INFO)
+    if not _mainlog.handlers:
+        _h = logging.StreamHandler(sys.stdout)
+        _h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        _mainlog.addHandler(_h)
+    top_n_plot = int(config.get("top_n_slides_to_plot", 3))
+    scratch_dir = os.environ.get("SCRATCH_DIR")
+    if not args.no_galleries and not os.environ.get("PVS_RAW_SLIDE_DIR") and scratch_dir:
+        staged_wsi = stage_wsi_hybrid(project_root, scratch_dir, exp_name, top_n_plot, _mainlog)
+        if staged_wsi is not None:
+            raw_slide_dir = staged_wsi
 
-    similar_patches = patch_index.search_similar_patches_multi(
-        query_vecs, k=k, nprobe=nprobe, rerank_pool=rerank_pool, max_tiles_reranked=max_tiles_reranked
-    )
-    similar_patches.to_csv(run_dir / "similar_patches.csv", index=False)
-    logger.info(f"top similar patches:\n{similar_patches}")
-
-    top_slides = patch_index.search_top_slides_multi(
-        query_vecs, k_candidates=k_candidates, nprobe=nprobe, top_n_slides=top_n_slides
-    )
-    top_slides.to_csv(run_dir / "top_slides.csv", index=False)
-    logger.info(f"top slides (reverse lookup):\n{top_slides}")
-
-    plots_dir = run_dir / "thumbnail_plots"
-    plots_dir.mkdir(exist_ok=True)
-    gallery_dir = run_dir / "patch_gallery"
-    gallery_dir.mkdir(exist_ok=True)
-    # similar_patches (k=k, above) is a single global top-k across the whole
-    # corpus, so most individual top_slides (chosen by the unrelated
-    # n_hits_ratio metric in search_top_slides_multi) have zero rows in it —
-    # not because they lack any real match, just because the global top-k is
-    # too small a net. An earlier version of this experiment worked around
-    # that by falling back to a k=k_candidates/rerank_pool=k_candidates
-    # search (near-unbounded — thousands of candidates) whenever a slide
-    # missed the global top-k. That made the displayed hit count meaningless
-    # across slides: a slide inside the tight global top-k showed only its
-    # few rows there, while a slide that missed it showed however many
-    # thousands of far weaker candidates the unbounded fallback happened to
-    # return for it — the exact opposite of what hit count should signal.
-    #
-    # Fixed by applying one consistent, exact-similarity-based rule to every
-    # plotted slide: k=rerank_pool instead of k=k. rerank_pool (200) is
-    # already the number of approximate candidates per tile search_similar_
-    # patches_multi exact-reranks before truncating to k — this just stops
-    # discarding 180 of those 200 already-computed exact scores instead of
-    # inventing a new cutoff. Any slide with truly zero rows here (its
-    # patches never even placed among the top 200 exact-reranked candidates
-    # of any of the max_tiles_reranked tiles) is skipped — that's honest
-    # information (its n_hits_ratio ranking came from weak/approximate
-    # matches only), not something to paper over with an unbounded pool.
-    hit_pool = patch_index.search_similar_patches_multi(
-        query_vecs, k=rerank_pool, nprobe=nprobe, rerank_pool=rerank_pool,
-        max_tiles_reranked=max_tiles_reranked,
-    )
-    for slide_id in top_slides["slide_id"].head(top_n_slides_to_plot):
-        hits = hit_pool[hit_pool["slide_id"] == slide_id]
-        if hits.empty:
-            continue
-        fig = plot_slide_hits_on_thumbnail(slide_id, hits, thumbnails_dir, patch_index.slide_meta)
-        fig.savefig(plots_dir / f"{slide_id}.png", dpi=150)
-
-        gallery_fig = plot_hit_patch_gallery(hits, raw_slide_dir, patch_index.slide_meta)
-        gallery_fig.savefig(gallery_dir / f"{slide_id}.png", dpi=150)
-
-    results = {
-        "image": args.image,
-        "stain_reference": args.stain_reference,
+    params = {
         "stain_reference_per_tile": str(stain_reference_per_tile) if stain_reference_per_tile else None,
-        "auto_scale": args.auto_scale,
-        "scale_info": scale_info,
-        "n_tiles": int(query_vecs.shape[0]),
-        "n_similar_patches": int(len(similar_patches)),
-        "n_top_slides": int(len(top_slides)),
-        "similar_patches_path": str(run_dir / "similar_patches.csv"),
-        "top_slides_path": str(run_dir / "top_slides.csv"),
-        "thumbnail_plots_dir": str(plots_dir),
-        "patch_gallery_dir": str(gallery_dir),
-        "tile_score_heatmap_dir": str(heatmap_dir),
+        "thumbnails_dir": thumbnails_dir,
+        "raw_slide_dir": raw_slide_dir,
+        "tile_size": config.get("tile_size", 224),
+        "k": config.get("k", 20),
+        "nprobe": config.get("nprobe", 32),
+        "rerank_pool": config.get("rerank_pool", 200),
+        "max_tiles_reranked": config.get("max_tiles_reranked", 4),
+        "k_candidates": config.get("k_candidates", 8000),
+        "top_n_slides": config.get("top_n_slides", 20),
+        "top_n_slides_to_plot": config.get("top_n_slides_to_plot", 3),
+    }
+    plot_fns = {
+        "tile_scores": plot_query_tile_scores,
+        "thumbnail": plot_slide_hits_on_thumbnail,
+        "gallery": plot_hit_patch_gallery,
+        "close": plt.close,
     }
 
-    # ── Save results ──────────────────────────────────────────────────────────
-    (run_dir / "results.json").write_text(
-        json.dumps(results, indent=2, ensure_ascii=False)
-    )
+    n_done = 0
+    n_failed = 0
+    for variant_stem, images in query_sets:
+        try:
+            process_query_set(
+                variant_stem=variant_stem, images=images, project_root=project_root,
+                exp_name=exp_name, output_root=output_root, patch_index=patch_index,
+                tile_transform=tile_transform, centroids=centroids, args=args,
+                params=params, plot_fns=plot_fns,
+            )
+            n_done += 1
+        except Exception:
+            # one bad query set (e.g. a corrupt image) must not abort a 94-query
+            # sweep; its run_dir stays without completion.json so a re-run retries.
+            n_failed += 1
+            traceback.print_exc()
+            print(f"!! query set FAILED: {variant_stem}")
+        print(f"[{n_done + n_failed}/{len(query_sets)}] {variant_stem}")
 
-    complete_run(run_dir)
-    logger.info(f"Done. {results}")
+    print(f"Done: {n_done} ok, {n_failed} failed, of {len(query_sets)} query set(s).")
+    if n_failed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
