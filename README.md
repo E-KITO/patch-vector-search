@@ -15,16 +15,21 @@ UNIパッチ埋め込みに対するクラスタベースのベクトル検索
   シート)を出力できる。`Deposit, glycogen` では GT スライドを全除外した deliver モードで
   未ラベルスライドのみから137枚を構成済み(病理レビュー待ち)。下記「成果物の試作」参照。
 - **どの所見で機能するか**: **glycogen(137枚)と ground glass(113枚)は機能する**
-  (ランダム対照で判定精度91%)。**hypertrophy**(同59%、chance 以下)と
-  **granular eosinophilic**(候補の93%が背景)は不成立。所見は「パッチ内で完結する
+  (ランダム対照で判定精度91%)。**hypertrophy**(同59%、chance 以下)は不成立。
+  **granular eosinophilic** はコーパスに一般化可能なシグナルがほぼ無い — 背景除去後の
+  `experiments/0019` deliver で非 seed 候補が5枚しか残らず(0002 時代の「候補74枚中48枚が
+  背景クロップ、最終21枚」は背景ノイズの生存者だった)。所見は「パッチ内で完結する
   テクスチャ」「相対的基準を要する」「sub-patch 局所」「コーパスカバレッジ不足」の
   4クラスに分かれ、機能するのは最初の1つだけ。下記「所見の3クラス分け」参照。
   **GT recall だけでは判定を誤るので、0015 の後は必ず
   `scripts/random_patch_baseline.py` でランダム対照を取ること**(下記「ランダム対照による検証」)。
-- **既知の負債**: `_is_blank_tile` が背景の半分以下しか検出できておらず、コーパスの
-  manifest に**約35万枚の背景パッチが残っている**。検索がこれを引くと候補が汚染される
-  (granular で顕在化)。修正には索引再構築が要るが GPU 再埋め込みは不要。
-  下記「背景パッチ」参照。
+- **背景パッチ除去(2026-09-09、完了)**: 旧 `_is_blank_tile`(平均輝度>240 かつ 標準偏差<8)は
+  背景の半分以下しか捕まえておらず、manifest に約39万枚の背景パッチが残っていた。
+  彩度基準(`sat_frac < 0.10`、job 10491 の閾値監査で確定)で `lib/patch_blankness.py` に
+  再定義し、`experiments/0017`(manifest、389,959枚 = 2.12% 除外)→ `0018`(FAISS 索引
+  再構築、GPU 再埋め込み不要)を実施。`_is_blank_tile` もクエリ側で同じ彩度基準に統一。
+  **効果**: max_similarity ランキングの自己検索順位が顕著に改善(granular eos の
+  `sim_best` 20→2 等)、n_hits_ratio ランキングと GT 比較は中立。下記「背景パッチ」参照。
 - **モデル/コーパスの検索天井**: 自己検索診断
   (`scripts/self_retrieval_diagnostic.py`、2026-09-04、2026-09-08にバッチ交絡の扱いを
   拡張、下記「自己検索診断」参照)で、**uni_v1 + 現行コーパスがバッチ交絡(同一化合物・
@@ -159,6 +164,12 @@ Ground truth比較(`scripts/validate_against_ground_truth.py`)のクエリ画像
       選別が効いていることを確認**(判定精度91%)。一方 **hypertrophy は不成立**と確定し、
       所見の分類は3クラスになった。glycogen 137枚の病理レビュー待ち。詳細は下記
       「成果物の試作」「ランダム対照による検証」「所見の3クラス分け」参照
+- [x]  ~~コーパスに残る背景パッチ(約39万枚)を落とす~~
+      → 2026-09-09、`scripts/measure_corpus_blankness.py`(全パッチ彩度測定)→ 閾値監査
+      (`sat_frac < 0.10`)→ `experiments/0017`(manifest、2.12% 除外)→ `0018`(索引再構築)。
+      GPU 再埋め込み不要。max_similarity ランキングの自己検索順位は顕著に改善、
+      n_hits_ratio ランキングと GT 比較は中立。granular は候補プール崩壊で成果物化せず。
+      詳細は下記「背景パッチ」参照
 - [ ]  **アトラス→TG-GATEsのドメインギャップを詰める**(0014 でこれが #1 ブロッカーと確定。
       アトラス図版からの組織タイル抽出の改善、複数図版のマルチクエリ化など)\
 など、いろいろやる。
@@ -301,6 +312,17 @@ top_slides = patch_index.search_top_slides_multi(query_vecs, top_n_slides=20)  #
   seed = NNLアトラス図版。詳細は下記「成果物の試作」参照)
 - `experiments/0015_..._build_finding_patch_set_seed_slide`(同上、seed = その所見の
   TG-GATEsスライド。curation は `lib/patch_set.py`。詳細は下記「成果物の試作」参照)
+- `experiments/0016_..._image_query_path_diagnostic`(クエリ埋め込み経路が 0014 の
+  結論の交絡かを測る3 tier 診断。詳細は下記「experiments/0016」参照)
+- `experiments/0017_..._build_patch_manifest_deblank` → `0018_..._build_faiss_index_deblank`
+  (0001/0002 のコーパスから `sat_frac < 0.10` の背景 389,959 枚を除いた版。エンコーダ・
+  ジオメトリ・OPQ+IVF+PQ ハイパラは 0001/0002 と完全一致。詳細は下記「背景パッチ」参照。
+  既定インデックスに昇格するかは未判断)
+- `experiments/0019_..._build_finding_patch_set_deblank`(0015 の deliver を 0018 コーパスで
+  回し直す A/B。`index_exp_dir` のみ差分。詳細は下記「背景パッチ」参照)
+- `lib/patch_blankness.py` — パッチの blankness 測定(`blankness_metrics`)と背景除外基準
+  (`is_background`、`sat_frac < 0.10`)。コーパス側(`lib/manifest.py`)・クエリ側
+  (`lib/query_embedding._is_blank_tile`)の両方が参照
 - `lib/patch_set.py` — 索引ヒット → 代表パッチ集の productization レイヤー
   (類似度しきい値・スライド内NMS・スライド上限・ラウンドロビン・空白除外・切り出し・manifest)
 - `scripts/validate_against_ground_truth.py` — 新しいパイプライン案をNNLアトラス由来GTで検証するツール
@@ -313,6 +335,11 @@ top_slides = patch_index.search_top_slides_multi(query_vecs, top_n_slides=20)  #
   正規化をv1インデックスで再検証(2026-08-20、詳細は下記参照)
 - `scripts/crop_necrosis_query_tile.py` — 壊死巣内部だけを224x224で手動クロップし、タイル
   選択バイアスを回避したクエリを作る(2026-08-20、詳細は下記参照)
+- `scripts/measure_corpus_blankness.py` — 全 18.4M パッチを raw WSI から切り出して
+  `mean_intensity` / `std_intensity` / `sat_frac` を測る(background 除去の閾値決定用。
+  索引・エンコーダ不使用、スライド並列。2026-09-09、詳細は下記「背景パッチ」参照)
+- `scripts/audit_blank_threshold.py` — 上の parquet から `sat_frac` / `mean_intensity` で
+  bin 分けしてパッチをサンプルし、コンタクトシートに落とす(閾値の目視監査。2026-09-09)
 
 ## uni_v2コーパスの調査状況(2026-08-14、一旦区切り)
 
@@ -702,6 +729,14 @@ Deposit glycogen 4.5 vs 26.5 等)。0013発見2の「n_hits_ratioとmax_similari
 本物だが、**現行の既定(n_hits_ratio)が良い側**。集計指標をmax_similarityに変える案は
 この診断で否定された。
 
+**追記(2026-09-09、背景除去後)**: この乖離の主因は背景パッチだった。`experiments/0018`
+(`sat_frac < 0.10` の背景を除いたコーパス)で自己検索を回し直すと(job 10496)、
+`nhr_best_rank` は不変のまま `sim_best_rank` が一斉に縮む(granular eos 20→2、
+Single cell necrosis 125→25.5、Alteration cytoplasmic 67.5→1.5)。背景の多いスライドが
+「最良マッチ1枚の類似度」で浮上して GT スライドを押し下げていたのが解消された。
+n_hits_ratio が良い側という結論は変わらないが、**その差は背景由来で、除去すれば
+max_similarity もかなり追いつく**。詳細は上記「背景パッチ」。
+
 ### 発見5: コーパス内1化合物の所見は自己検索では評価不能
 
 `Proliferation, Kupffer cell` / `Alteration, cytoplasmic` / `Lesion,NOS` はコーパス内
@@ -949,7 +984,7 @@ manifest から逆算したものだった。commit `ad2318e` で `n_after_sim_f
 `n_after_nms_and_cap` / `n_slides_at_max_per_slide` 等を stats とログに追加した
 (0014 のインライン版にはあった診断が、`lib/patch_set.py` へ切り出す際に失われていた)。
 
-## 背景パッチ: コーパスに約35万枚残っている(scripts/blank_patch_similarity_diagnostic.py、2026-09-05)
+## 背景パッチ: 約39万枚をコーパスから除去(2026-09-05 診断 → 2026-09-09 実施)
 
 granular の候補の93%が背景で埋まった原因として、2つの説明が競合した。
 
@@ -992,12 +1027,84 @@ background: 39/2000 (1.9%) by sat_frac; 18 (0.9%) by the current _is_blank_tile
 `_is_blank_tile`(平均輝度 > 240 **かつ** 標準偏差 < 8)は「完全な白」しか落とせず、
 彩度ベースの基準で見つかる背景の半分以下しか捕まえていない。granular の21枚中16枚が
 素通りしたのと整合する。コーパス全体では**約35万枚の背景パッチが manifest に残っている**
-計算になる。
+計算になる(この 2000 枚サンプルからの外挿。全パッチ実測では 389,959 枚 = 2.12%、下記)。
 
 これを `lib/manifest.py` で落とせば、検索が背景を引くことは原理的になくなり、全所見に
 効く。**GPU での再埋め込みは不要**で、h5 の特徴量はそのまま使い manifest から該当行を
 除いて FAISS 索引を再構築するだけ(`experiments/0001`→`0002` の再実行相当、CPU のみ)。
 uni_v2 での再埋め込み(1000スライド分の GPU 推論)とはコストが2桁違う。
+
+### 全パッチの彩度測定と閾値確定(scripts/measure_corpus_blankness.py、2026-09-09)
+
+上記の 2000 枚サンプルは極値を捉えられないので、**全 18,368,337 パッチを raw WSI から
+切り出して** `mean_intensity` / `std_intensity` / `sat_frac`(HSV 彩度 > 0.10 の画素割合)を
+測った(job 10487、1000 スライド・0 失敗、`outputs/measure_corpus_blankness/corpus_blankness.parquet`)。
+`sat_frac` の分布から閾値を決めるため、bin ごとにパッチをサンプルしてコンタクトシートに
+落とす監査(`scripts/audit_blank_threshold.py`、job 10491)を行った結果:
+
+- `sat_frac < 0.10` の bin は全域がスライド背景・切片エッジの細片・空視野中の赤血球・
+  カバーガラス由来アーティファクトで、診断対象の組織は `sat_frac ≈ 0.15` から現れる。
+- 当初検討していた `& mean_intensity > 215` ガードは、`sat_frac < 0.10` に暗い組織は
+  存在せず、明白なゴミ(ピンぼけのグレー、カバーガラスのひび、走査端の半黒パッチ)を
+  約1,500枚残すだけだったので**不採用**。基準は `sat_frac < 0.10` 単独に確定。
+
+`lib/patch_blankness.py::is_background` がこの基準。`lib/query_embedding._is_blank_tile`
+もクエリ側で同じ基準に統一した(旧「輝度+分散」判定は置換)。アトラス図版クエリの
+タイル分割では白マージンは旧ルールでも既に捕捉できていたため、クエリ側の変更は
+GT 比較・0015/0019 の結果に影響しない(job 10495 の `baseline_v1` が誤格納修正後の
+job 10467 と完全一致)。
+
+### experiments/0017 → 0018 → 0019: 背景除去の実行と結果(2026-09-09)
+
+| exp | 内容 | 結果 |
+|---|---|---|
+| **0017** | `build_patch_manifest` に `background_blankness_path` を追加し、`sat_frac < 0.10` の行を manifest・slide_meta・学習サンプルから除外(染色正規化の除外機構と union) | 389,959 枚除外(2.12%)、17,978,378 / 18,368,337 パッチ。job 10492 |
+| **0018** | 0017 の manifest から FAISS 索引を再構築(`experiments/0002` のミラー、OPQ+IVF+PQ パラメータ不変) | 17,978,378 vectors。job 10493 |
+| **0019** | `experiments/0015` の deliver を 0018 コーパスで回し直す A/B(`index_exp_dir` のみ差分) | job 10497、下記 |
+
+**GT 比較(job 10495、`scripts/validate_against_ground_truth.py` に `v1_deblank` パイプライン追加)**:
+7 カテゴリすべてで中立。`best_rank` は ±1〜5 の両方向のぶれ、`found` は Hypertrophy で
+GT 1枚減(25→24)以外は不変。この比較は `search_top_slides_multi` = n_hits_ratio 
+ランキングなので、後述のとおり背景除去の効果が出にくい指標。
+
+**自己検索(job 10496 / 10494、`scripts/self_retrieval_diagnostic.py` に `--index-dir`)**:
+2 つのランキング指標で挙動が割れた。
+
+- `nhr_best_rank_med`(n_hits_ratio): 16 findings すべて ±1 で不変。
+- `sim_best_rank_med`(max_similarity): **一貫して改善、時に大幅**。
+  granular eosinophilic 20.0→**2.0**、Single cell necrosis 125.0→**25.5**、
+  Alteration cytoplasmic 67.5→**1.5**、glycogen 26.5→10.5、Swelling 12.0→2.0。
+  `sim_hit@10` も広く改善(granular eos 0.4→1.0、Alteration 0.0→1.0)。
+
+背景パッチは多くのクエリに中程度〜高い類似度を持つため、「スライドを最良マッチ1枚の
+類似度で順位付け」する `sim` ランキングでは背景の多いスライドが浮上して GT スライドを
+押し下げていた。背景を抜くと GT スライドの `sim` 順位が上がる。n_hits_ratio は
+候補集合内のパッチ数を正規化するので元々これに頑健。**0013 発見2 の「nhr と sim の
+乖離」を、背景除去は sim 側を直すことで縮める**(下記「自己検索診断」発見4 に追記)。
+
+**deliver A/B(job 10497、0015 vs 0019、同一パラメータ)**:
+
+| finding | 0015(0002 corpus) | 0019(0018 corpus) |
+|---|---|---|
+| ground glass | 候補295 → blank除外0 → 最終113(寄与26スライド) | 候補295 → 最終113(寄与26スライド、バイト一致) |
+| glycogen | 候補174 → blank除外4 → 最終137(寄与30スライド) | 候補170 → 最終137(寄与30スライド) |
+| **granular eosinophilic** | 候補**74** → blank除外**48** → 最終**21**(寄与15スライド) | 候補**5** → 最終**5**(寄与5スライド) |
+
+ground glass / glycogen は実質同一(glycogen の候補 174→170 は blank だった4枚が
+コーパスから消えた分)。**不変チェック通過** — 背景汚染が問題でなかった所見は乱れない。
+
+granular eosinophilic は「配信集がクリーンになる」ではなく **候補プールの崩壊**が起きた。
+0002 では非 seed 候補74枚のうち48枚(65%)が背景クロップで `_is_blank_tile` に落とされ、
+残り21枚が「成果物」になっていた。0018 ではその48枚がコーパスから消えているので、
+5000 候補の窓が seed スライドの自己マッチでほぼ埋まり、真の非 seed パッチは5枚だけ。
+→ **この所見にはコーパスに一般化可能なシグナルがほぼ無い**ことが露呈した(自己検索でも
+n_compounds=2・`batch_dominates_finding_rate`=1.0)。背景除去は誤解を招く「21枚の
+成果物」を正直な「5枚、シグナル不足」に変えた。self_retrieval の `sim_best` 改善は
+GT スライドの順位向上として本物だが、この所見の**配信物**は元々薄い。
+
+ground glass / glycogen(0019)のランダム対照は `scripts/adhoc_random_patch_baseline.sh`
+の 0019 ターゲット(`--corpus-dir outputs/0018_.../default`)で別途取る。granular は
+n=5 で盲検シートに乗らないため対照なし。
 
 ## 所見の3クラス分け(0014 / 0015 / ランダム対照で見えた実データの構造)
 
@@ -1013,8 +1120,11 @@ uni_v2 での再埋め込み(1000スライド分の GPU 推論)とはコスト�
 | コーパスカバレッジ不足 | **granular eosinophilic** | **機能しない**(類似組織が乏しく天井が低い) |
 
 4つ目は所見自体の性質ではなく**コーパス側の事情**なので、コーパスを広げれば解消しうる
-点が他の3つと違う。ただし現行コーパスでは、背景フィルタを直しても granular の天井
-0.894 は変わらないため、成果物にはならない見込み。
+点が他の3つと違う。ただし現行コーパスでは成果物にならない見込みで、これは
+`experiments/0019`(背景除去済みコーパスでの deliver)で確認された: 背景を抜くと
+granular の非 seed 候補は5枚まで崩壊する(0002 時代の21枚は候補の65%が背景クロップの
+プールの生存者だった)。天井 0.894 が低いだけでなく、その帯域の非 seed 組織が
+そもそもコーパスにほとんど無い。上記「背景パッチ」の deliver A/B 参照。
 
 **「相対的基準を要する」クラスが機能しない理由**: 肝細胞肥大は「正常より大きい」という
 相対的な判断であり、同一スライド内の正常部という基準があって初めて成立する。224px に
@@ -1072,10 +1182,13 @@ self_retrieval_diagnostic / 0015 の TG-GATEs アームは2軸で違っていた
    残る問いは「選別しているそれがグリコーゲン沈着か」に絞られた
 2. **ground glass deliver の113枚も病理レビューに回す** — 2例目の「機能する所見」
    (判定精度91%・recall 100%)。glycogen と同じく未ラベルスライドのみから組んだ集合
-3. **背景パッチをコーパスから落とす** — `_is_blank_tile` を彩度ベースの基準に置き換え、
-   `lib/manifest.py` でフィルタして索引を再構築する(GPU 不要)。全所見に効き、granular の
-   「候補の93%が背景」は解消する。ただし granular の天井 0.894 は変わらないので、
-   granular が成果物になるとは限らない(上記「背景パッチ」参照)
+3. ~~**背景パッチをコーパスから落とす**~~ **(2026-09-09 完了、`experiments/0017`→`0018`)** —
+   `sat_frac < 0.10` の背景 389,959 枚(2.12%)を manifest から除外し索引を再構築(GPU 不要)。
+   `_is_blank_tile` もクエリ側で同基準に統一。max_similarity ランキングの自己検索順位は
+   顕著に改善したが(上記「背景パッチ」)、GT 比較・n_hits_ratio ランキングは中立、
+   granular は「候補プールの崩壊」で成果物化せず(コーパスに一般化可能なシグナルが
+   ほぼ無いことが露呈)。ground glass / glycogen の配信集は不変。
+   → 残タスク: 0019 のランダム対照、0018 コーパスを既定に昇格するかの判断
 4. **deliver モードの候補枯れ対策** — glycogen 137枚、ground glass 113枚と、いずれも
    target 150 に未達。ただし ground glass は「多様性が尽きた」形で失敗ではないため、
    `k_candidate_patches` を上げる前に、その所見のコーパス内スライド数から**現実的な
