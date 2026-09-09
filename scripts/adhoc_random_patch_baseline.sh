@@ -18,7 +18,7 @@ set -euo pipefail
 PROJECT_ROOT="/workspace/filesrv02/kito/patch-vector-search"
 
 # =====================================================
-# 対象パッチ集: "<name>|<patch_set_dir>|<exclude_slides>"
+# 対象パッチ集: "<name>|<patch_set_dir>|<exclude_slides>|<only_slides>|<corpus_dir>"
 #
 # exclude_slides にはその run の seed スライドを渡す(検索結果から除外されて
 # いた側と、ランダム対照の母集団を揃えるため)。validate モードなら seed
@@ -30,6 +30,11 @@ PROJECT_ROOT="/workspace/filesrv02/kito/patch-vector-search"
 # 4番目のフィールド(省略可)は --only-slides。指定するとコーパス全体ではなく
 # そのスライドからのみサンプルする = 対照ではなく **seed スライドの中身の調査**。
 # 出力される blank 率がそのまま「seed のうち組織が疎な割合」になる。
+#
+# 5番目のフィールド(省略可、既定 outputs/0002_.../default)は --corpus-dir。
+# ランダム対照を引くコーパス。curated 集合を作った索引に合わせること —
+# experiments/0019 の集合なら outputs/0018_20260909_build_faiss_index_deblank/default
+# (背景除去済みの母集団から対照を引かないと A/B が非対称になる)。
 #
 # 実行済み:
 #   hypertrophy (job 9937) — 判定精度59%(ベースライン61%)= 区別できず、不成立。
@@ -53,13 +58,15 @@ TARGETS=(
 
 RUN_CMDS=""
 for target in "${TARGETS[@]}"; do
-    IFS='|' read -r NAME PATCH_SET EXCLUDE_SLIDES ONLY_SLIDES <<< "${target}"
+    IFS='|' read -r NAME PATCH_SET EXCLUDE_SLIDES ONLY_SLIDES CORPUS_DIR <<< "${target}"
     RUN_CMDS+="echo '--- ${NAME} ---'"$'\n'
     RUN_CMDS+="python scripts/random_patch_baseline.py"
     RUN_CMDS+=" --patch-set ${PATCH_SET}"
     RUN_CMDS+=" --out outputs/random_patch_baseline/${NAME}"
     RUN_CMDS+=" --exclude-slides '${EXCLUDE_SLIDES}'"
-    RUN_CMDS+=" --only-slides '${ONLY_SLIDES:-}'"$'\n'
+    RUN_CMDS+=" --only-slides '${ONLY_SLIDES:-}'"
+    if [ -n "${CORPUS_DIR:-}" ]; then RUN_CMDS+=" --corpus-dir ${CORPUS_DIR}"; fi
+    RUN_CMDS+=$'\n'
 done
 
 echo "Running scripts/random_patch_baseline.py on $(hostname) for ${#TARGETS[@]} target(s) ..."

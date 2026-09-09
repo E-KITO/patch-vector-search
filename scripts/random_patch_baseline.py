@@ -44,6 +44,11 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+# Default corpus the random patches are drawn from. Override with --corpus-dir
+# to match whichever index the curated --patch-set was built against — e.g.
+# outputs/0018_..._build_faiss_index_deblank/default for an experiments/0019
+# patch set, so the random control samples the same (background-filtered)
+# population the curated set was drawn from.
 CORPUS_INDEX_DIR = Path("outputs/0002_20260808_build_faiss_index/default")
 RAW_SLIDE_DIR = Path("data/moo_collected_tggate_wsi/raw_wsi")
 
@@ -63,6 +68,13 @@ def parse_args() -> argparse.Namespace:
         "(e.g. outputs/0015_.../hypertrophy__validate/hypertrophy__validate).",
     )
     p.add_argument("--out", required=True, type=Path, help="Output directory.")
+    p.add_argument(
+        "--corpus-dir", type=Path, default=CORPUS_INDEX_DIR,
+        help="Index run_dir whose manifest.parquet / slide_meta.parquet define "
+        "the population the random control is sampled from. Default: %(default)s. "
+        "Set to the index the --patch-set was built against (e.g. "
+        "outputs/0018_..._build_faiss_index_deblank/default for an 0019 set).",
+    )
     p.add_argument(
         "--n", type=int, default=None,
         help="Number of random control patches. Default: match the curated set's size.",
@@ -177,15 +189,15 @@ def main() -> None:
     curated["slide_id"] = curated["slide_id"].astype(str)
     n = args.n if args.n is not None else len(curated)
 
-    manifest = pd.read_parquet(CORPUS_INDEX_DIR / "manifest.parquet")
+    manifest = pd.read_parquet(args.corpus_dir / "manifest.parquet")
     manifest["slide_id"] = manifest["slide_id"].astype(str)
     # lib/manifest.py writes slide_meta with slide_id as a column (index=False);
     # PatchIndex.load is what turns it into the index, so do the same here.
-    slide_meta = pd.read_parquet(CORPUS_INDEX_DIR / "slide_meta.parquet").set_index("slide_id")
+    slide_meta = pd.read_parquet(args.corpus_dir / "slide_meta.parquet").set_index("slide_id")
     slide_meta.index = slide_meta.index.astype(str)
 
     print(f"curated set: {len(curated)} patches from {curated['slide_id'].nunique()} slides")
-    print(f"corpus: {len(manifest)} patches, excluding {len(exclude_slides)} slide(s)")
+    print(f"corpus ({args.corpus_dir}): {len(manifest)} patches, excluding {len(exclude_slides)} slide(s)")
 
     only_slides = {s.strip() for s in args.only_slides.split(",") if s.strip()}
     if only_slides:
@@ -218,6 +230,7 @@ def main() -> None:
 
     summary = {
         "patch_set": str(args.patch_set),
+        "corpus_dir": str(args.corpus_dir),
         "n_curated": int(len(curated_entries)),
         "n_random": int(len(random_entries)),
         "n_pages": n_pages,
