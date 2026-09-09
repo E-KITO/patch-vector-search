@@ -87,9 +87,14 @@ Ground truth比較(`scripts/validate_against_ground_truth.py`)のクエリ画像
   再実行する場合は修正後のフォルダを使うこと。
 
 - **【2026-09-09 修正後の再実行(job 10467)】** 誤格納を直したフォルダで
-  `validate_against_ground_truth.py` を回し直した結果(`outputs/gt_validation_results.csv`
-  を上書き、修正前は `outputs/gt_validations/gt_validation_results_2026-09-04_pre_nnl_misfiled_fix.csv`
-  に退避):
+  `validate_against_ground_truth.py` を回し直した結果(修正前は
+  `outputs/gt_validations/gt_validation_results_2026-09-04_pre_nnl_misfiled_fix.csv`
+  に退避)。下表はいずれも **0002 コーパス**(背景除去前)での値。
+  なお 2026-09-09 の 0018 昇格後、`outputs/gt_validation_results.csv` は
+  `baseline_v1` = 0018 で再生成済み(job 10499)。0018 での 7 カテゴリは 0002 と
+  ほぼ同じ(Kupffer best 76→78、Hypertrophy 23→24、他は不変〜±3。下記「背景パッチ」
+  の GT A/B と一致)。旧 0002 baseline_v1 の値は
+  `outputs/gt_validations/gt_validation_results_2026-09-09_deblank_ab_job10495.csv` に残る:
 
   | カテゴリ | baseline_v1 best (前→後) | v1_macenko best (前→後) |
   |---|---|---|
