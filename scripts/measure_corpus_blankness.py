@@ -22,6 +22,13 @@ WSIs on NFS. Slide-parallel (multiprocessing over slides, one SVS handle per
 slide), resumable -- a per-slide parquet is written under per_slide/ and
 existing ones are skipped, so a timed-out job just needs re-submitting.
 
+--stage-dir copies each .svs to node-local scratch (one sequential NFS read)
+before opening it, rather than letting openslide do thousands of scattered
+level-0 tile reads over NFS -- worth it while filesrv02's HDD is degraded.
+Only the SVS reads are staged; outputs (the per-slide parquets, the merged
+parquet, _progress.json) stay on NFS so a timed-out job can still resume and
+so `cat _progress.json` works live.
+
 Progress: a tqdm bar plus a checkpoint line every 25 slides in the job log,
 and a live outputs/measure_corpus_blankness/_progress.json heartbeat
 (slides_done / patches_measured / slides_per_s / eta_s / failed) refreshed
@@ -38,6 +45,7 @@ import argparse
 import json
 import multiprocessing as mp
 import os
+import shutil
 import sys
 import time
 from datetime import datetime
@@ -70,13 +78,31 @@ def _write_progress(payload: dict) -> None:
 
 
 def _measure_slide(payload):
-    """Worker: crop every patch of one slide, return (slide_id, n, error)."""
-    slide_id, local_idx, coords, psl = payload
+    """Worker: crop every patch of one slide, return (slide_id, n, error).
+
+    When stage_dir is set, the .svs is copied there (one sequential NFS read)
+    before openslide opens it, instead of letting openslide do thousands of
+    scattered level-0 tile reads straight over NFS.
+    """
+    slide_id, local_idx, coords, psl, stage_dir = payload
     import openslide
 
+    src = RAW_SLIDE_DIR / f"{slide_id}.svs"
+    staged = None
+    if stage_dir is not None:
+        staged = Path(stage_dir) / f"{slide_id}.svs"
+        try:
+            shutil.copy2(src, staged)
+        except Exception as e:  # scratch full / unwritable -- fall back to NFS
+            print(f"  {slide_id}: stage copy failed ({e!r}); reading from NFS", flush=True)
+            staged = None
+    svs_path = staged if staged is not None else src
+
     try:
-        slide = openslide.OpenSlide(str(RAW_SLIDE_DIR / f"{slide_id}.svs"))
+        slide = openslide.OpenSlide(str(svs_path))
     except Exception as e:
+        if staged is not None:
+            staged.unlink(missing_ok=True)
         return slide_id, 0, f"open: {e!r}"
 
     recs = []
@@ -97,6 +123,8 @@ def _measure_slide(payload):
         return slide_id, 0, f"read: {e!r}"
     finally:
         slide.close()
+        if staged is not None:
+            staged.unlink(missing_ok=True)
 
     df = pd.DataFrame(recs, columns=_COLS)
     df.insert(0, "slide_id", str(slide_id))
@@ -136,7 +164,17 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=None, help="only the first N slides (smoke test)")
     ap.add_argument("--overwrite", action="store_true", help="re-measure slides that already have a per-slide parquet")
     ap.add_argument("--concat-only", action="store_true", help="skip measuring; just merge existing per-slide parquets")
+    ap.add_argument(
+        "--stage-dir", type=str, default=None,
+        help="node-local scratch dir; each worker copies its .svs here (one sequential "
+        "read) before openslide opens it, instead of ~18k scattered NFS tile reads. "
+        "The adhoc script points this at /scratch and cleans it up on exit.",
+    )
     args = ap.parse_args()
+
+    if args.stage_dir:
+        Path(args.stage_dir).mkdir(parents=True, exist_ok=True)
+        print(f"staging .svs via {args.stage_dir} before each open", flush=True)
 
     PER_SLIDE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -165,7 +203,7 @@ def main() -> None:
             continue
         g = groups[sid]
         psl = int(round(float(slide_meta.loc[sid, "patch_size_level0"])))
-        payloads.append((sid, g["local_idx"].to_numpy(), g[["coord_x", "coord_y"]].to_numpy(), psl))
+        payloads.append((sid, g["local_idx"].to_numpy(), g[["coord_x", "coord_y"]].to_numpy(), psl, args.stage_dir))
     print(f"to measure: {len(payloads)} slides ({n_skipped} already done)", flush=True)
 
     if payloads:
