@@ -5,7 +5,7 @@ UNIパッチ埋め込みに対するクラスタベースのベクトル検索
 類似する組織パッチと、それを多く含むWSIを検索できる。  
 **最終的な目標は、INHANDやNTPの非腫瘍性病変アトラスのような、所見の代表的なパッチを検索クエリとして使い、TGGATEの大規模なWSIコーパスから同じ所見を引き出してデータベース化すること。**
 
-## 現状(2026-09-08時点)
+## 現状(2026-09-09時点)
 
 - **動くもの**: 任意の画像(1枚〜複数枚)を渡すと、類似パッチ検索とWSI逆引きができる。
   実解像度でのヒットパッチ表示・クエリタイルごとの近似スコアヒートマップ表示も追加済み
@@ -15,16 +15,24 @@ UNIパッチ埋め込みに対するクラスタベースのベクトル検索
   シート)を出力できる。`Deposit, glycogen` では GT スライドを全除外した deliver モードで
   未ラベルスライドのみから137枚を構成済み(病理レビュー待ち)。下記「成果物の試作」参照。
 - **どの所見で機能するか**: **glycogen(137枚)と ground glass(113枚)は機能する**
-  (ランダム対照で判定精度91%)。**hypertrophy**(同59%、chance 以下)と
-  **granular eosinophilic**(候補の93%が背景)は不成立。所見は「パッチ内で完結する
+  (ランダム対照で判定精度91%)。**hypertrophy**(同59%、chance 以下)は不成立。
+  **granular eosinophilic** はコーパスに一般化可能なシグナルがほぼ無い — 背景除去後の
+  `experiments/0019` deliver で非 seed 候補が5枚しか残らず(0002 時代の「候補74枚中48枚が
+  背景クロップ、最終21枚」は背景ノイズの生存者だった)。所見は「パッチ内で完結する
   テクスチャ」「相対的基準を要する」「sub-patch 局所」「コーパスカバレッジ不足」の
   4クラスに分かれ、機能するのは最初の1つだけ。下記「所見の3クラス分け」参照。
   **GT recall だけでは判定を誤るので、0015 の後は必ず
   `scripts/random_patch_baseline.py` でランダム対照を取ること**(下記「ランダム対照による検証」)。
-- **既知の負債**: `_is_blank_tile` が背景の半分以下しか検出できておらず、コーパスの
-  manifest に**約35万枚の背景パッチが残っている**。検索がこれを引くと候補が汚染される
-  (granular で顕在化)。修正には索引再構築が要るが GPU 再埋め込みは不要。
-  下記「背景パッチ」参照。
+- **背景パッチ除去(2026-09-09、完了・既定昇格)**: 旧 `_is_blank_tile`(平均輝度>240 かつ
+  標準偏差<8)は背景の半分以下しか捕まえておらず、manifest に約39万枚の背景パッチが
+  残っていた。彩度基準(`sat_frac < 0.10`、job 10491 の閾値監査で確定)で
+  `lib/patch_blankness.py` に再定義し、`experiments/0017`(manifest、389,959枚 = 2.12%
+  除外)→ `0018`(FAISS 索引再構築、GPU 再埋め込み不要)を実施。`_is_blank_tile` も
+  クエリ側で同じ彩度基準に統一。**効果**: max_similarity ランキングの自己検索順位が
+  顕著に改善(granular eos の `sim_best` 20→2 等)、n_hits_ratio ランキングと GT 比較は
+  中立、負の影響なし。→ **0018 を既定インデックスに昇格**(`scripts`/notebook の既定、
+  `validate_against_ground_truth.py` の `baseline_v1`)。0002 は「背景除去前」の参照として
+  残す。下記「背景パッチ」参照。
 - **モデル/コーパスの検索天井**: 自己検索診断
   (`scripts/self_retrieval_diagnostic.py`、2026-09-04、2026-09-08にバッチ交絡の扱いを
   拡張、下記「自己検索診断」参照)で、**uni_v1 + 現行コーパスがバッチ交絡(同一化合物・
@@ -46,6 +54,11 @@ UNIパッチ埋め込みに対するクラスタベースのベクトル検索
   コーパス内スライドが1化合物しかなく自己検索で天井を測れないため、ドメインギャップ説の
   直接的な裏付けは無い(下記「自己検索診断」発見5)。今後の定量評価は自己検索診断のほうが
   交絡が少なく所見カバレッジも広い(7 → 16所見)が、バッチ交絡には引き続き注意。
+  なお、Kupffer クエリフォルダには修正前(〜2026-09-09)Hypertrophy 図版3枚
+  (うち正常肝2枚)が混入しており、これが Kupffer の低迷の一因だった。誤格納を直して
+  再実行(job 10467)したところ **Kupffer の baseline_v1 best_rank は 202 → 76**
+  (mean 220 → 80)に改善、Hypertrophy も 49 → 23。融合壊死は 10 → 14 で不変
+  (下記「評価に使ったデータとその限界」の誤格納の項)。
 - **未解決**: アトラス図版のドメインギャップの詰め方、融合壊死・髄外造血の表現
   (uni v2等)。「今後やること」参照。
 
@@ -54,9 +67,49 @@ UNIパッチ埋め込みに対するクラスタベースのベクトル検索
 Ground truth比較(`scripts/validate_against_ground_truth.py`)のクエリ画像は、
 `data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver/`に置いた
 **NTP(National Toxicology Program)の非腫瘍性病変アトラス(NNL)**から取得した、
-各所見カテゴリの代表的な掲載図版(26カテゴリ・94枚、1所見あたり1〜8枚)。
+各所見カテゴリの代表的な掲載図版(26カテゴリ・91枚、1所見あたり1〜8枚)。
 
 以下の限界を踏まえて結果を解釈すること:
+
+- **【2026-09-09 修正】クエリ図版フォルダに15件の誤格納があった。** `image_id` を
+  atlas ページに照合したところ、Necrosis の図版6枚が `Hyperplasia, Nodular` /
+  `Hypertrophy` フォルダに、Hypertrophy の図版5枚が `Kupffer` / `Intrahepatocellular
+  Erythrocytes` フォルダに、ほか Inflammation 2枚・Focus 2枚が別フォルダに入っていた。
+  2026-09-09 に全件を正しいフォルダへ移動し、重複コピー3件(` (1).jpg`)を削除した
+  (94→91枚、対応表は `data/query/nnl_liver_atlas_misfiled.csv`、経緯は
+  `data/query/nnl_liver_atlas_README.md`)。**この修正より前に回した
+  `scripts/validate_against_ground_truth.py` / `experiments/0014` のアトラスクエリのうち、
+  Necrosis(修正前はフォルダに10枚中4枚しか無かった)・Hypertrophy(修正前は5枚 = 本物4枚
+  + Necrosis 図版1枚混入、本来の fig 1–4,6 は他フォルダに散逸)・Kupffer(修正前は4枚 =
+  本物1枚 + Hypertrophy 図版3枚、うち2枚は正常肝)は汚染されたクエリセットで
+  評価されている。** Glycogen・Increased mitosis・Hematopoiesis・封入体は影響なし。
+  0014 は glycogen・mitosis でしか実行していないため直接の影響は無いが、Kupffer 等で
+  再実行する場合は修正後のフォルダを使うこと。
+
+- **【2026-09-09 修正後の再実行(job 10467)】** 誤格納を直したフォルダで
+  `validate_against_ground_truth.py` を回し直した結果(修正前は
+  `outputs/gt_validations/gt_validation_results_2026-09-04_pre_nnl_misfiled_fix.csv`
+  に退避)。下表はいずれも **0002 コーパス**(背景除去前)での値。
+  なお 2026-09-09 の 0018 昇格後、`outputs/gt_validation_results.csv` は
+  `baseline_v1` = 0018 で再生成済み(job 10499)。0018 での 7 カテゴリは 0002 と
+  ほぼ同じ(Kupffer best 76→78、Hypertrophy 23→24、他は不変〜±3。下記「背景パッチ」
+  の GT A/B と一致)。旧 0002 baseline_v1 の値は
+  `outputs/gt_validations/gt_validation_results_2026-09-09_deblank_ab_job10495.csv` に残る:
+
+  | カテゴリ | baseline_v1 best (前→後) | v1_macenko best (前→後) |
+  |---|---|---|
+  | Kupffer | **202 → 76**(mean 220 → 80) | 766 → 821 |
+  | Hypertrophy | **49 → 23** | 14 → 21 |
+  | Necrosis (→ Single cell necrosis) | 10 → 14 | 77 → 86 |
+  | Increased mitosis / Glycogen / Hematopoiesis / 封入体 | 不変(7 / 7 / 25 / 480) | 不変(1 / 14 / 84 / 97) |
+
+  非汚染4カテゴリが前後で完全一致することが、修正が Necrosis/Hypertrophy/Kupffer の
+  3フォルダにしか影響していないことのサニティチェックになっている。**Kupffer の
+  改善が大きい**: 修正前は「本物1枚 + Hypertrophy 図版3枚(正常肝2枚)」で正常肝タイルが
+  クエリを汎用肝細胞へ引っぱっていた。本物の Kupffer 図版1枚だけにしたら best_rank 202 → 76。
+  README 各所の「Kupffer は最悪カテゴリ(best_rank 202)」という記述は誤格納由来を含んでおり、
+  実際の値は 76(それでも良くはないが、ドメインギャップの状況証拠としての重みは下がる)。
+  融合壊死は図版を10枚に戻しても改善せず(10 → 14)、「表現の限界」という結論は変わらない。
 
 - **アトラス画像1枚は所見部位を含む図版全体であり、所見が写っているのは画像の一部分に
   過ぎない**(矢印注釈・番号ラベル・周囲の正常組織や余白を含む、1800x1200px程度の
@@ -65,9 +118,9 @@ Ground truth比較(`scripts/validate_against_ground_truth.py`)のクエリ画像
   機械的にタイル分割し、白背景タイルの除外以外は所見領域かどうかの判別なしに全タイルを
   検索へ投入している。つまりこの評価は「自動化できる範囲でどこまでやれるか」を測った
   ものであり、人手でROIを切り出した場合の性能上限を示すものではない。best_rankが悪い
-  カテゴリ(例: Kupffer細胞増殖 best_rank=124、封入体 best_rank=14〜297)は、モデルや
-  検索アルゴリズムの限界だけでなく、クエリ画像に占める「所見と無関係なタイル」の割合が
-  高いことも一因である可能性が高い。**自己検索診断(2026-09-04、2026-09-08拡張)は
+  カテゴリ(例: 封入体 best_rank=480、Kupffer細胞増殖 best_rank=76 ※誤格納修正前は 202)は、
+  モデルや検索アルゴリズムの限界だけでなく、クエリ画像に占める「所見と無関係なタイル」の
+  割合が高いことも一因である可能性が高い。**自己検索診断(2026-09-04、2026-09-08拡張)は
   common な肝所見の多くがコーパス内で自己検索できることを示したが、Kupfferはコーパス内
   1化合物のため天井を測れず、この低迷がドメインギャップ由来という切り分けはできていない
   (下記「自己検索診断」参照)。交絡の少ない定量評価が必要ならそちらを使うが、
@@ -119,6 +172,12 @@ Ground truth比較(`scripts/validate_against_ground_truth.py`)のクエリ画像
       選別が効いていることを確認**(判定精度91%)。一方 **hypertrophy は不成立**と確定し、
       所見の分類は3クラスになった。glycogen 137枚の病理レビュー待ち。詳細は下記
       「成果物の試作」「ランダム対照による検証」「所見の3クラス分け」参照
+- [x]  ~~コーパスに残る背景パッチ(約39万枚)を落とす~~
+      → 2026-09-09、`scripts/measure_corpus_blankness.py`(全パッチ彩度測定)→ 閾値監査
+      (`sat_frac < 0.10`)→ `experiments/0017`(manifest、2.12% 除外)→ `0018`(索引再構築)。
+      GPU 再埋め込み不要。max_similarity ランキングの自己検索順位は顕著に改善、
+      n_hits_ratio ランキングと GT 比較は中立。granular は候補プール崩壊で成果物化せず。
+      詳細は下記「背景パッチ」参照
 - [ ]  **アトラス→TG-GATEsのドメインギャップを詰める**(0014 でこれが #1 ブロッカーと確定。
       アトラス図版からの組織タイル抽出の改善、複数図版のマルチクエリ化など)\
 など、いろいろやる。
@@ -176,19 +235,22 @@ scaffold元テンプレートの汎用依存で、このプロジェクトのコ
 
 ## 使い方
 
-前提: `experiments/0001_20260808_build_patch_manifest` →
-`experiments/0002_20260808_build_faiss_index` が実行済みで、
-`outputs/0002_20260808_build_faiss_index/default/` にインデックスがある状態。
+前提: `experiments/0001` → `0002` → `0017_..._build_patch_manifest_deblank` →
+`0018_..._build_faiss_index_deblank` が実行済みで、
+`outputs/0018_20260909_build_faiss_index_deblank/default/` にインデックスがある状態。
+**この 0018(背景除去済み)が 2026-09-09 以降の既定インデックス**(下記「背景パッチ」)。
+背景除去前の索引が要る場合は `outputs/0002_20260808_build_faiss_index/default/`。
 
 ```python
 import numpy as np
 from lib.query_embedding import embed_image_tiles
 from lib.search import PatchIndex
 
+INDEX_DIR = "outputs/0018_20260909_build_faiss_index_deblank/default"
 patch_index = PatchIndex.load(
-    index_path="outputs/0002_20260808_build_faiss_index/default/index.faiss",
-    manifest_path="outputs/0002_20260808_build_faiss_index/default/manifest.parquet",
-    slide_meta_path="outputs/0002_20260808_build_faiss_index/default/slide_meta.parquet",
+    index_path=f"{INDEX_DIR}/index.faiss",
+    manifest_path=f"{INDEX_DIR}/manifest.parquet",
+    slide_meta_path=f"{INDEX_DIR}/slide_meta.parquet",
     features_dir="data/trident_processed/20x_224px_0px_overlap/features_uni_v1",
 )
 
@@ -213,7 +275,7 @@ top_slides = patch_index.search_top_slides_multi(query_vecs, top_n_slides=20)  #
 | `search_similar_patches_multi` / `search_top_slides_multi`(タイルごと個別検索→結果統合) | ✅ 推奨(既定) | 複数参照画像はベクトル平均よりこちらの方が頑健 |
 | WSI逆引きの`n_hits_ratio`ソート | ✅ 推奨(既定) | 単純な`n_hits`ソートより7カテゴリ中5カテゴリで改善、追加コストなし。2026-09-04の自己検索診断でも`max_similarity`ソートより全所見でほぼ優位(下記「自己検索診断」発見3) |
 | `embed_image_tiles_auto_scale`(倍率自動補正、`lib/mpp_estimation.py`) | ❌ 非推奨 | 画質は改善するが、GT比較では検索精度がほぼ悪化(7カテゴリ中0カテゴリで最良) |
-| `stain_reference=`(Macenko染色正規化) | ❌ 非推奨(確定) | 同上。ケースによっては大きく悪化する。自作`lib.stain_normalize`実装(自己一致性0.5〜0.84)→`lib.torchstain_normalize`(自己一致性0.96〜0.996)への差し替え、さらに2026-09-04の交絡なし再検証(uni_v1・ジオメトリ完全一致・コーパス側もクエリ側もper-tile Macenko・自己一致性検証済み、`experiments/0010`/`0012`)まで行ったが、GT比較で`baseline_v1`を上回れず(best_rank 7カテゴリ中4カテゴリで悪化、うちKupffer 202→766・Necrosis 10→77等は大幅悪化。改善は所見局在型の3カテゴリのみ)。染色正規化はこれで完全に棚上げ。詳細は下記「クエリ側染色正規化の再検証」参照 |
+| `stain_reference=`(Macenko染色正規化) | ❌ 非推奨(確定) | 同上。ケースによっては大きく悪化する。自作`lib.stain_normalize`実装(自己一致性0.5〜0.84)→`lib.torchstain_normalize`(自己一致性0.96〜0.996)への差し替え、さらに2026-09-04の交絡なし再検証(uni_v1・ジオメトリ完全一致・コーパス側もクエリ側もper-tile Macenko・自己一致性検証済み、`experiments/0010`/`0012`)まで行ったが、GT比較で`baseline_v1`を上回れず(best_rank 7カテゴリ中4カテゴリで悪化、うちKupffer 202→766・Necrosis 10→77等は大幅悪化。改善は所見局在型の3カテゴリのみ)。染色正規化はこれで完全に棚上げ。詳細は下記「クエリ側染色正規化の再検証」参照(※Kupffer/Necrosis/Hypertrophyの数値はNNLアトラス誤格納の修正前。修正後もmacenko優位は覆らない) |
 | `embed_image(..., resize_mode="centercrop")`(単一クロップ) | ⚠️ 場合による | 結果の分散が大きく、GTを完全に見失うこともある |
 | `encoder_name="uni_v2"`コーパス(1536次元・256px、`experiments/0004`/`0005`/`0006`) | ⚠️ v1よりやや劣るが僅差(公平な比較後) | クエリ側は`lib.torchstain_normalize.normalize_to_reference`で`data/baseline/63958_x38976_y7616.png`に正規化してから使うこと(`lib.stain_normalize`の自作Macenkoでは不十分——自己一致性0.5〜0.84止まり、torchstainなら0.96〜0.996)。正規化後の公平なGT比較でも7カテゴリ中6カテゴリでv1が優位だが、差は大幅縮小(例: Hypertrophy 94→27)。PQ量子化を細かくする(pq_m 64→96)ことも試したが改善なし。詳細は下記「uni_v2コーパスの調査状況」参照。既定は引き続き`uni_v1`(`experiments/0001`/`0002`) |
 
@@ -240,7 +302,8 @@ top_slides = patch_index.search_top_slides_multi(query_vecs, top_n_slides=20)  #
   raw_wsi/`(全1000スライド分の生WSI)に対して既に使える状態(2026-08-20判明、モジュール
   docstringの旧記述は古い)
 - `experiments/0001_..._build_patch_manifest` → `0002_..._build_faiss_index` → `0003_..._query_demo`
-  (この順で依存。**現行の推奨インデックス**、`uni_v1`・1024次元)
+  (この順で依存。`uni_v1`・1024次元。**2026-09-09 以降の既定インデックスは背景除去済みの
+  0018**、下記参照 — 0002 は背景除去前の索引として残す)
 - `experiments/0004_..._build_patch_manifest_v2` → `0005_..._build_faiss_index_v2`
   (`uni_v2`・1536次元・pq_m=64版)→ `0006_..._build_faiss_index_v2_pqm96`
   (同じ元データ、pq_m=96版。詳細は下記「uni_v2コーパスの調査状況」参照)
@@ -261,6 +324,17 @@ top_slides = patch_index.search_top_slides_multi(query_vecs, top_n_slides=20)  #
   seed = NNLアトラス図版。詳細は下記「成果物の試作」参照)
 - `experiments/0015_..._build_finding_patch_set_seed_slide`(同上、seed = その所見の
   TG-GATEsスライド。curation は `lib/patch_set.py`。詳細は下記「成果物の試作」参照)
+- `experiments/0016_..._image_query_path_diagnostic`(クエリ埋め込み経路が 0014 の
+  結論の交絡かを測る3 tier 診断。詳細は下記「experiments/0016」参照)
+- `experiments/0017_..._build_patch_manifest_deblank` → `0018_..._build_faiss_index_deblank`
+  (0001/0002 のコーパスから `sat_frac < 0.10` の背景 389,959 枚を除いた版。エンコーダ・
+  ジオメトリ・OPQ+IVF+PQ ハイパラは 0001/0002 と完全一致。**2026-09-09 に既定インデックス
+  へ昇格**(`lib`/scripts/notebook の既定、README 各所)。詳細は下記「背景パッチ」参照)
+- `experiments/0019_..._build_finding_patch_set_deblank`(0015 の deliver を 0018 コーパスで
+  回し直す A/B。`index_exp_dir` のみ差分。詳細は下記「背景パッチ」参照)
+- `lib/patch_blankness.py` — パッチの blankness 測定(`blankness_metrics`)と背景除外基準
+  (`is_background`、`sat_frac < 0.10`)。コーパス側(`lib/manifest.py`)・クエリ側
+  (`lib/query_embedding._is_blank_tile`)の両方が参照
 - `lib/patch_set.py` — 索引ヒット → 代表パッチ集の productization レイヤー
   (類似度しきい値・スライド内NMS・スライド上限・ラウンドロビン・空白除外・切り出し・manifest)
 - `scripts/validate_against_ground_truth.py` — 新しいパイプライン案をNNLアトラス由来GTで検証するツール
@@ -273,6 +347,11 @@ top_slides = patch_index.search_top_slides_multi(query_vecs, top_n_slides=20)  #
   正規化をv1インデックスで再検証(2026-08-20、詳細は下記参照)
 - `scripts/crop_necrosis_query_tile.py` — 壊死巣内部だけを224x224で手動クロップし、タイル
   選択バイアスを回避したクエリを作る(2026-08-20、詳細は下記参照)
+- `scripts/measure_corpus_blankness.py` — 全 18.4M パッチを raw WSI から切り出して
+  `mean_intensity` / `std_intensity` / `sat_frac` を測る(background 除去の閾値決定用。
+  索引・エンコーダ不使用、スライド並列。2026-09-09、詳細は下記「背景パッチ」参照)
+- `scripts/audit_blank_threshold.py` — 上の parquet から `sat_frac` / `mean_intensity` で
+  bin 分けしてパッチをサンプルし、コンタクトシートに落とす(閾値の目視監査。2026-09-09)
 
 ## uni_v2コーパスの調査状況(2026-08-14、一旦区切り)
 
@@ -323,6 +402,13 @@ torchstainでMacenko正規化済みの生WSIから抽出)という別コーパ�
 この仮説自体を検証し、否定的な結論に至ったため、優先度は下がっている。
 
 ## IVFクラスタリング仮説の検証状況(uni_v1、2026-08-19)
+
+> **注記(2026-09-09)**: 以下の Kupffer 数値(best_rank=202 等)は、NNL アトラスの
+> Kupffer クエリフォルダに Hypertrophy 図版3枚が誤格納されていた状態で測ったもの。
+> 誤格納を直して再測定すると Kupffer の baseline_v1 best_rank は **76**(上記
+> 「評価に使ったデータとその限界」参照)。ただし本節の結論(nprobe/PQ量子化どちらも
+> 主因ではない、厳密計算でも順位が上がらない)はカテゴリ非依存の論理で、封入体
+> (非汚染、best_rank=480)でも同じ結論なので、**仮説否定の結論は変わらない**。
 
 上のuni_v2調査で浮上した「IVFクラスタリング(`nlist`/`nprobe`)側の近似誤差が
 GT正解スライドの順位を大きく落としているのでは」という仮説を、**既定の
@@ -407,6 +493,14 @@ Kupffer細胞増殖・封入体の順位低迷の主因ではない。厳密計�
 経てサンプル数を増やすことが前提になる。
 
 ## クエリ側染色正規化の再検証(torchstain、2026-08-20)
+
+> **注記(2026-09-09)**: 本節および上の「何を使うべきか」表にある Kupffer/Necrosis/
+> Hypertrophy の best_rank(例: Kupffer 202→766、Hypertrophy 49→14/49→17)は、NNL
+> アトラスのクエリフォルダに誤格納があった状態で測ったもの。誤格納修正後の baseline_v1 は
+> Kupffer 76・Hypertrophy 23・Necrosis 14、v1_macenko は Kupffer 821・Hypertrophy 21・
+> Necrosis 86(上記「評価に使ったデータとその限界」参照)。相対関係(macenko は色情報依存
+> カテゴリで baseline_v1 より大きく悪化)は修正後も維持され、**「染色正規化は棚上げ」の
+> 結論は変わらない**(4回の独立確認 + 悪化が色情報依存カテゴリに集中というパターン)。
 
 染色正規化(`stain_reference=`)がGT比較で非推奨とされていた根拠
 (`scripts/compare_query_normalization.py`)を確認したところ、内部で自作の
@@ -532,6 +626,17 @@ GTがあるのは7カテゴリだけ、ラベルはスライド単位)である�
 出力を横並び比較可能)。`lib.query_embedding.embed_image_tiles`と
 `lib.visualize.plot_query_tile_scores`に`tile_transform`フックを追加してある。
 
+> **注記(2026-09-09)**: 上記の発見1〜3・結論は、この8枚(`data/query/` 直下のリネーム
+> コピー、いずれも `matched` 図版)に基づいており NNL アトラスの誤格納の影響を受けない。
+> ただし 0013 は後日 `--atlas-root` で ①所見フォルダ集約(25クエリ、job 10429)と
+> ②画像1枚ずつ(91クエリ、job 10435/10437/10438)のバルク sweep も回しており、
+> **①の 9 dir**(`query__Liver_-_Necrosis_...`(4→10図版)、Kupffer(4→1)、Hypertrophy(5→9)、
+> Hyperplasia-Nodular(7→2)、Intrahepatocellular-Erythrocytes(4→2)、Focus(3→5)、
+> Stellate(4→2)、Inflammation(4→6)、Hepatodiaphragmatic-Nodule(8→3))が誤格納フォルダの
+> 中身で計算されていた。誤格納修正後に **job 10468** で ① を回し直し
+> (`--no-galleries --overwrite`、25クエリ `0 failed`)、②の孤児 dir 3件(削除した
+> ` (1).jpg` 由来)を削除した。②本体は dir 名が画像ファイル名なので影響なし。
+
 ### 発見1: per-tile Macenkoは「局所の好塩基性所見」のタイル識別を明確に改善する
 
 髄外造血のヒートマップが決定的。アトラス図版の造血細胞塊を指す矢印2本のタイルが、
@@ -555,6 +660,12 @@ GT比較の数値(髄外造血 best_rank 25→84「悪化」)はこのタイル�
 低く(max 0.44)、類洞のKupffer密な領域も勝たない。これらの失敗は前処理(タイリング・
 スケール・染色正規化)より手前 — UNI埋め込み + このコーパスが凝固壊死・Kupffer増生を
 distinctiveに表現していない。
+
+> **注記(2026-09-09)**: ここで見た「Kupffer図版」は本物の figure 1(a19999)。
+> ただし `validate_against_ground_truth.py` の Kupffer フォルダには当時 Hypertrophy 図版が
+> 3枚誤格納されており、GT比較の Kupffer best_rank=202 はその汚染を含んでいた
+> (修正後は 76、上記「評価に使ったデータとその限界」)。本節のヒートマップ観察
+> (図版単体では Kupffer 密領域がスコアで勝たない)自体は変わらない。
 
 ### 結論
 
@@ -630,6 +741,14 @@ Deposit glycogen 4.5 vs 26.5 等)。0013発見2の「n_hits_ratioとmax_similari
 本物だが、**現行の既定(n_hits_ratio)が良い側**。集計指標をmax_similarityに変える案は
 この診断で否定された。
 
+**追記(2026-09-09、背景除去後)**: この乖離の主因は背景パッチだった。`experiments/0018`
+(`sat_frac < 0.10` の背景を除いたコーパス)で自己検索を回し直すと(job 10496)、
+`nhr_best_rank` は不変のまま `sim_best_rank` が一斉に縮む(granular eos 20→2、
+Single cell necrosis 125→25.5、Alteration cytoplasmic 67.5→1.5)。背景の多いスライドが
+「最良マッチ1枚の類似度」で浮上して GT スライドを押し下げていたのが解消された。
+n_hits_ratio が良い側という結論は変わらないが、**その差は背景由来で、除去すれば
+max_similarity もかなり追いつく**。詳細は上記「背景パッチ」。
+
 ### 発見5: コーパス内1化合物の所見は自己検索では評価不能
 
 `Proliferation, Kupffer cell` / `Alteration, cytoplasmic` / `Lesion,NOS` はコーパス内
@@ -666,7 +785,8 @@ manifest → スライド別コンタクトシート)を載せる。0009 系の�
 ### experiments/0014: NNL アトラス図版を seed に(2026-09-04、否定的)
 
 `Deposit, glycogen`(アトラス図版4枚)と `Increased mitosis`(同1枚)で実行。
-各150枚出力したが**代表パッチ集としては不成立**:
+各150枚出力したが**代表パッチ集としては不成立**(この2所見のクエリフォルダは
+2026-09-09 に判明した誤格納15件の影響を受けていないので、下記の結論は有効):
 
 - glycogen: 最終150枚が**88スライドに拡散**、うち GT 陽性は 1/6 スライドのみ。
 - mitosis: 150枚が150スライドに1枚ずつ(最大限に拡散)、GT 陽性 4/10 スライド。
@@ -845,6 +965,31 @@ GT スライドが25枚と多い所見では、chance 比が高く出ても選�
 形態差がある」までしか言わない。glycogen の137枚が本当にグリコーゲン沈着かどうかは、
 依然として病理レビューが必要。
 
+### 背景除去済みコーパスでの再検証(job 10498、experiments/0019、2026-09-09)
+
+背景除去(下記「背景パッチ」)後、対照の母集団が **100% 組織**(0002 では 2.12% が背景)に
+なるので、選別の証拠がまだ立つかを `experiments/0019` の deliver 集合(0015 とほぼ同一)で
+測り直した(`scripts/adhoc_random_patch_baseline.sh` の 0019 ターゲット、`--corpus-dir` を
+0018 に向ける)。
+
+- **glycogen: 84/100(84%)。** 0002 の 91% から微減。誤答16枚のうち14枚が「random を
+  curated と誤判定」= 偽陽性。飽食ラット肝はグリコーゲンに富むパッチが多く、背景を
+  抜いた対照プールは「淡明レース状」の当たりが増えて**ベースラインが上がった**(引き分け
+  にくくなった)ため。**選別自体は依然として明確に効いている。**
+- **ground glass: 判定を取り違えた。** 生の盲検判定は 20/100 = 偶然(50%)から強く外れる
+  **逆相関**。判定者(Claude)が "ground glass appearance" を「濃い硝子様好酸性細胞質」と
+  想定したが、実際の curated 集合は「均質で細かいテクスチャの中等度ピンク」(glycogen より
+  おとなしい空胞化)で、それを "正常寄り" として random 判定していた。100 試行で 20% は
+  H0(50%)から p≪0.001 で外れる → **curated 集合は一貫した識別可能な phenotype を持つ**
+  (ラベルの取り違えであって、選別が効いていないのではない)。curated 例で校正し直すと
+  実効分離能は約80%。ただし **glycogen と ground glass の phenotype は淡明・空胞化肝細胞
+  という点で視覚的に重なり、非専門家(および本モデル)は両者を切り分けられていない**。
+- granular eosinophilic は 0019 で非 seed 候補が5枚しか無く盲検シートに乗らないため対照なし
+  (下記「背景パッチ」の deliver A/B 参照)。
+
+**要点**: 背景除去後も glycogen の選別は明確(84%)。ground glass も選別自体は効いている
+が、"ground glass" という所見ラベルと視覚 phenotype の対応づけは**病理専門家の確認が要る**。
+
 ## job 9962: whole-patch テクスチャ系への展開(2026-09-05)
 
 hypertrophy が不成立と分かったので、残る候補 `Ground glass appearance`(コーパス内4枚)と
@@ -876,7 +1021,7 @@ manifest から逆算したものだった。commit `ad2318e` で `n_after_sim_f
 `n_after_nms_and_cap` / `n_slides_at_max_per_slide` 等を stats とログに追加した
 (0014 のインライン版にはあった診断が、`lib/patch_set.py` へ切り出す際に失われていた)。
 
-## 背景パッチ: コーパスに約35万枚残っている(scripts/blank_patch_similarity_diagnostic.py、2026-09-05)
+## 背景パッチ: 約39万枚をコーパスから除去(2026-09-05 診断 → 2026-09-09 実施)
 
 granular の候補の93%が背景で埋まった原因として、2つの説明が競合した。
 
@@ -919,12 +1064,95 @@ background: 39/2000 (1.9%) by sat_frac; 18 (0.9%) by the current _is_blank_tile
 `_is_blank_tile`(平均輝度 > 240 **かつ** 標準偏差 < 8)は「完全な白」しか落とせず、
 彩度ベースの基準で見つかる背景の半分以下しか捕まえていない。granular の21枚中16枚が
 素通りしたのと整合する。コーパス全体では**約35万枚の背景パッチが manifest に残っている**
-計算になる。
+計算になる(この 2000 枚サンプルからの外挿。全パッチ実測では 389,959 枚 = 2.12%、下記)。
 
 これを `lib/manifest.py` で落とせば、検索が背景を引くことは原理的になくなり、全所見に
 効く。**GPU での再埋め込みは不要**で、h5 の特徴量はそのまま使い manifest から該当行を
 除いて FAISS 索引を再構築するだけ(`experiments/0001`→`0002` の再実行相当、CPU のみ)。
 uni_v2 での再埋め込み(1000スライド分の GPU 推論)とはコストが2桁違う。
+
+### 全パッチの彩度測定と閾値確定(scripts/measure_corpus_blankness.py、2026-09-09)
+
+上記の 2000 枚サンプルは極値を捉えられないので、**全 18,368,337 パッチを raw WSI から
+切り出して** `mean_intensity` / `std_intensity` / `sat_frac`(HSV 彩度 > 0.10 の画素割合)を
+測った(job 10487、1000 スライド・0 失敗、`outputs/measure_corpus_blankness/corpus_blankness.parquet`)。
+`sat_frac` の分布から閾値を決めるため、bin ごとにパッチをサンプルしてコンタクトシートに
+落とす監査(`scripts/audit_blank_threshold.py`、job 10491)を行った結果:
+
+- `sat_frac < 0.10` の bin は全域がスライド背景・切片エッジの細片・空視野中の赤血球・
+  カバーガラス由来アーティファクトで、診断対象の組織は `sat_frac ≈ 0.15` から現れる。
+- 当初検討していた `& mean_intensity > 215` ガードは、`sat_frac < 0.10` に暗い組織は
+  存在せず、明白なゴミ(ピンぼけのグレー、カバーガラスのひび、走査端の半黒パッチ)を
+  約1,500枚残すだけだったので**不採用**。基準は `sat_frac < 0.10` 単独に確定。
+
+`lib/patch_blankness.py::is_background` がこの基準。`lib/query_embedding._is_blank_tile`
+もクエリ側で同じ基準に統一した(旧「輝度+分散」判定は置換)。アトラス図版クエリの
+タイル分割では白マージンは旧ルールでも既に捕捉できていたため、クエリ側の変更は
+GT 比較・0015/0019 の結果に影響しない(job 10495 の `baseline_v1` が誤格納修正後の
+job 10467 と完全一致)。
+
+### experiments/0017 → 0018 → 0019: 背景除去の実行と結果(2026-09-09)
+
+| exp | 内容 | 結果 |
+|---|---|---|
+| **0017** | `build_patch_manifest` に `background_blankness_path` を追加し、`sat_frac < 0.10` の行を manifest・slide_meta・学習サンプルから除外(染色正規化の除外機構と union) | 389,959 枚除外(2.12%)、17,978,378 / 18,368,337 パッチ。job 10492 |
+| **0018** | 0017 の manifest から FAISS 索引を再構築(`experiments/0002` のミラー、OPQ+IVF+PQ パラメータ不変) | 17,978,378 vectors。job 10493 |
+| **0019** | `experiments/0015` の deliver を 0018 コーパスで回し直す A/B(`index_exp_dir` のみ差分) | job 10497、下記 |
+
+**GT 比較(job 10495、`scripts/validate_against_ground_truth.py` に `v1_deblank` パイプライン追加)**:
+7 カテゴリすべてで中立。`best_rank` は ±1〜5 の両方向のぶれ、`found` は Hypertrophy で
+GT 1枚減(25→24)以外は不変。この比較は `search_top_slides_multi` = n_hits_ratio 
+ランキングなので、後述のとおり背景除去の効果が出にくい指標。
+
+**自己検索(job 10496 / 10494、`scripts/self_retrieval_diagnostic.py` に `--index-dir`)**:
+2 つのランキング指標で挙動が割れた。
+
+- `nhr_best_rank_med`(n_hits_ratio): 16 findings すべて ±1 で不変。
+- `sim_best_rank_med`(max_similarity): **一貫して改善、時に大幅**。
+  granular eosinophilic 20.0→**2.0**、Single cell necrosis 125.0→**25.5**、
+  Alteration cytoplasmic 67.5→**1.5**、glycogen 26.5→10.5、Swelling 12.0→2.0。
+  `sim_hit@10` も広く改善(granular eos 0.4→1.0、Alteration 0.0→1.0)。
+
+背景パッチは多くのクエリに中程度〜高い類似度を持つため、「スライドを最良マッチ1枚の
+類似度で順位付け」する `sim` ランキングでは背景の多いスライドが浮上して GT スライドを
+押し下げていた。背景を抜くと GT スライドの `sim` 順位が上がる。n_hits_ratio は
+候補集合内のパッチ数を正規化するので元々これに頑健。**0013 発見2 の「nhr と sim の
+乖離」を、背景除去は sim 側を直すことで縮める**(下記「自己検索診断」発見4 に追記)。
+
+**deliver A/B(job 10497、0015 vs 0019、同一パラメータ)**:
+
+| finding | 0015(0002 corpus) | 0019(0018 corpus) |
+|---|---|---|
+| ground glass | 候補295 → blank除外0 → 最終113(寄与26スライド) | 候補295 → 最終113(寄与26スライド、バイト一致) |
+| glycogen | 候補174 → blank除外4 → 最終137(寄与30スライド) | 候補170 → 最終137(寄与30スライド) |
+| **granular eosinophilic** | 候補**74** → blank除外**48** → 最終**21**(寄与15スライド) | 候補**5** → 最終**5**(寄与5スライド) |
+
+ground glass / glycogen は実質同一(glycogen の候補 174→170 は blank だった4枚が
+コーパスから消えた分)。**不変チェック通過** — 背景汚染が問題でなかった所見は乱れない。
+
+granular eosinophilic は「配信集がクリーンになる」ではなく **候補プールの崩壊**が起きた。
+0002 では非 seed 候補74枚のうち48枚(65%)が背景クロップで `_is_blank_tile` に落とされ、
+残り21枚が「成果物」になっていた。0018 ではその48枚がコーパスから消えているので、
+5000 候補の窓が seed スライドの自己マッチでほぼ埋まり、真の非 seed パッチは5枚だけ。
+→ **この所見にはコーパスに一般化可能なシグナルがほぼ無い**ことが露呈した(自己検索でも
+n_compounds=2・`batch_dominates_finding_rate`=1.0)。背景除去は誤解を招く「21枚の
+成果物」を正直な「5枚、シグナル不足」に変えた。self_retrieval の `sim_best` 改善は
+GT スライドの順位向上として本物だが、この所見の**配信物**は元々薄い。
+
+ground glass / glycogen(0019)のランダム対照は取得済み(job 10498、上記「ランダム対照に
+よる検証」の 2026-09-09 追記): 背景除去後も glycogen の選別は明確(判定84%)、ground glass
+も phenotype は識別可能。granular は n=5 で盲検シートに乗らないため対照なし。
+
+### 既定インデックスへの昇格(2026-09-09)
+
+上の3つの A/B(GT 中立、self_retrieval は sim 改善・nhr 不変、deliver は不変〜露呈)で
+**負の影響が無いことが確認できた**ため、0018 を既定インデックスに昇格した:
+`notebooks/01_query_demo.ipynb`、`scripts/self_retrieval_diagnostic.py` /
+`scripts/random_patch_baseline.py` の既定、`scripts/validate_against_ground_truth.py` の
+`baseline_v1`、README 各所。0002 は「背景除去前」の参照として残し、
+`validate_against_ground_truth.py` では `--pipelines baseline_v1,v1_predeblank` で A/B を
+再現できる。完了済みの実験(0003, 0007–0016)の config はそのまま(実行記録として保存)。
+背景除去済みコーパスでの deliver は `experiments/0019` が担う。
 
 ## 所見の3クラス分け(0014 / 0015 / ランダム対照で見えた実データの構造)
 
@@ -940,8 +1168,11 @@ uni_v2 での再埋め込み(1000スライド分の GPU 推論)とはコスト�
 | コーパスカバレッジ不足 | **granular eosinophilic** | **機能しない**(類似組織が乏しく天井が低い) |
 
 4つ目は所見自体の性質ではなく**コーパス側の事情**なので、コーパスを広げれば解消しうる
-点が他の3つと違う。ただし現行コーパスでは、背景フィルタを直しても granular の天井
-0.894 は変わらないため、成果物にはならない見込み。
+点が他の3つと違う。ただし現行コーパスでは成果物にならない見込みで、これは
+`experiments/0019`(背景除去済みコーパスでの deliver)で確認された: 背景を抜くと
+granular の非 seed 候補は5枚まで崩壊する(0002 時代の21枚は候補の65%が背景クロップの
+プールの生存者だった)。天井 0.894 が低いだけでなく、その帯域の非 seed 組織が
+そもそもコーパスにほとんど無い。上記「背景パッチ」の deliver A/B 参照。
 
 **「相対的基準を要する」クラスが機能しない理由**: 肝細胞肥大は「正常より大きい」という
 相対的な判断であり、同一スライド内の正常部という基準があって初めて成立する。224px に
@@ -999,10 +1230,13 @@ self_retrieval_diagnostic / 0015 の TG-GATEs アームは2軸で違っていた
    残る問いは「選別しているそれがグリコーゲン沈着か」に絞られた
 2. **ground glass deliver の113枚も病理レビューに回す** — 2例目の「機能する所見」
    (判定精度91%・recall 100%)。glycogen と同じく未ラベルスライドのみから組んだ集合
-3. **背景パッチをコーパスから落とす** — `_is_blank_tile` を彩度ベースの基準に置き換え、
-   `lib/manifest.py` でフィルタして索引を再構築する(GPU 不要)。全所見に効き、granular の
-   「候補の93%が背景」は解消する。ただし granular の天井 0.894 は変わらないので、
-   granular が成果物になるとは限らない(上記「背景パッチ」参照)
+3. ~~**背景パッチをコーパスから落とす**~~ **(2026-09-09 完了、`experiments/0017`→`0018`)** —
+   `sat_frac < 0.10` の背景 389,959 枚(2.12%)を manifest から除外し索引を再構築(GPU 不要)。
+   `_is_blank_tile` もクエリ側で同基準に統一。max_similarity ランキングの自己検索順位は
+   顕著に改善したが(上記「背景パッチ」)、GT 比較・n_hits_ratio ランキングは中立、
+   granular は「候補プールの崩壊」で成果物化せず(コーパスに一般化可能なシグナルが
+   ほぼ無いことが露呈)。ground glass / glycogen の配信集は不変。
+   → 残タスク: 0019 のランダム対照、0018 コーパスを既定に昇格するかの判断
 4. **deliver モードの候補枯れ対策** — glycogen 137枚、ground glass 113枚と、いずれも
    target 150 に未達。ただし ground glass は「多様性が尽きた」形で失敗ではないため、
    `k_candidate_patches` を上げる前に、その所見のコーパス内スライド数から**現実的な

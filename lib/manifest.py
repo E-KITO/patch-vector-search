@@ -5,17 +5,21 @@ and produces the artifacts lib/faiss_index.py and lib/search.py build on:
 
 - manifest.parquet: one row per patch [slide_id, local_idx, coord_x, coord_y, global_idx]
 - slide_meta.parquet: one row per slide [slide_id, total_patches, total_patches_raw,
-  n_stain_norm_failed, level0_width, level0_height, patch_size_level0]
+  n_excluded, level0_width, level0_height, patch_size_level0]
 - training_sample.npy: a random subset of raw (unnormalized) float32 feature
   vectors, for fitting the FAISS index in lib.faiss_index.build_faiss_index
 
 `local_idx` is always the row index into the slide's h5 `features`/`coords`
-datasets. When stain_norm_failures_path is given (the Macenko corpus — see
-experiments/0010), the patches that could not be Macenko-normalized are
-excluded from the manifest, so `local_idx` is no longer contiguous within a
-slide: it lists only the kept rows. Both consumers (lib.faiss_index,
-lib.search) index the h5 by `local_idx` rather than assuming a 1:1
-manifest/h5 mapping.
+datasets. Patches can be excluded for two independent reasons, and when any
+are, `local_idx` is no longer contiguous within a slide (it lists only the
+kept rows) — both consumers (lib.faiss_index, lib.search) index the h5 by
+`local_idx` rather than assuming a 1:1 manifest/h5 mapping:
+
+  - stain_norm_failures_path: patches the Macenko corpus could not normalize
+    (the uni_v1_macenko corpus — see experiments/0010).
+  - background_blankness_path: slide-background patches, from
+    scripts/measure_corpus_blankness.py's corpus_blankness.parquet filtered by
+    lib.patch_blankness.is_background (sat_frac < 0.10 — see experiments/0017).
 """
 from __future__ import annotations
 
@@ -63,6 +67,27 @@ def _load_stain_norm_exclusions(
     }
 
 
+def _load_blankness_exclusions(
+    blankness_parquet_path: str | Path,
+    sat_frac_max: float = 0.10,
+) -> dict[str, np.ndarray]:
+    """Read a corpus_blankness.parquet (scripts/measure_corpus_blankness.py) and
+    return {slide_id: sorted unique local_idx to exclude as slide background}.
+
+    A patch is background if fewer than `sat_frac_max` of its pixels carry any
+    real stain colour — see lib.patch_blankness.is_background and the job 10491
+    audit (outputs/measure_corpus_blankness/audit/) that fixed the cut at 0.10.
+    """
+    from lib.patch_blankness import is_background
+
+    df = pd.read_parquet(blankness_parquet_path, columns=["slide_id", "local_idx", "sat_frac"])
+    df = df[is_background(df["sat_frac"].to_numpy(), sat_frac_max=sat_frac_max)]
+    return {
+        str(sid): np.sort(np.unique(g["local_idx"].to_numpy().astype(np.int64)))
+        for sid, g in df.groupby("slide_id")
+    }
+
+
 def build_patch_manifest(
     features_dir: str | Path,
     manifest_path: str | Path,
@@ -71,6 +96,8 @@ def build_patch_manifest(
     train_sample_size: int = 500_000,
     seed: int = 42,
     stain_norm_failures_path: str | Path | None = None,
+    background_blankness_path: str | Path | None = None,
+    background_sat_frac_max: float = 0.10,
 ) -> None:
     """Scan every {slide_id}.h5 under features_dir once and write the manifest artifacts.
 
@@ -96,6 +123,12 @@ def build_patch_manifest(
             excluded from the manifest, the slide_meta patch counts and the
             training sample, so the resulting corpus is 100% stain-normalized.
             Raises if the recorded failure rate exceeds its recorded threshold.
+        background_blankness_path: Optional corpus_blankness.parquet from
+            scripts/measure_corpus_blankness.py. When given, patches whose
+            sat_frac is below `background_sat_frac_max` (slide background — see
+            lib.patch_blankness.is_background and experiments/0017) are excluded
+            the same way. Combines with stain_norm_failures_path by union.
+        background_sat_frac_max: sat_frac cut for the above (default 0.10).
     """
     features_dir = Path(features_dir)
     h5_paths = sorted(features_dir.glob("*.h5"))
@@ -107,6 +140,21 @@ def build_patch_manifest(
         exclusions = _load_stain_norm_exclusions(stain_norm_failures_path)
         logger.info(
             "stain-norm exclusions: %d patches across %d slides",
+            sum(len(v) for v in exclusions.values()),
+            len(exclusions),
+        )
+    if background_blankness_path is not None:
+        bg = _load_blankness_exclusions(background_blankness_path, background_sat_frac_max)
+        logger.info(
+            "background exclusions (sat_frac < %.2f): %d patches across %d slides",
+            background_sat_frac_max,
+            sum(len(v) for v in bg.values()),
+            len(bg),
+        )
+        for sid, rows in bg.items():
+            exclusions[sid] = np.union1d(exclusions[sid], rows) if sid in exclusions else rows
+        logger.info(
+            "total exclusions: %d patches across %d slides",
             sum(len(v) for v in exclusions.values()),
             len(exclusions),
         )
@@ -128,16 +176,16 @@ def build_patch_manifest(
             attrs = f["coords"].attrs
             n_patches_raw = coords.shape[0]
 
-            # local_idx = true h5 row index of every patch we keep. With a
-            # stain-norm failure list this is a strict subset of range(N).
+            # local_idx = true h5 row index of every patch we keep. With an
+            # exclusion list this is a strict subset of range(N).
             keep = np.ones(n_patches_raw, dtype=bool)
             drop_rows = exclusions.get(slide_id)
             if drop_rows is not None and len(drop_rows):
                 in_range = drop_rows[(drop_rows >= 0) & (drop_rows < n_patches_raw)]
                 if len(in_range) != len(drop_rows):
                     raise ValueError(
-                        f"{slide_id}: stain-norm failure list has row indices "
-                        f"outside [0, {n_patches_raw}) — failure json and this "
+                        f"{slide_id}: exclusion list has row indices outside "
+                        f"[0, {n_patches_raw}) — the exclusion source and this "
                         "h5 disagree on the slide's patch count"
                     )
                 keep[in_range] = False
@@ -158,7 +206,7 @@ def build_patch_manifest(
                     "slide_id": slide_id,
                     "total_patches": n_kept,
                     "total_patches_raw": n_patches_raw,
-                    "n_stain_norm_failed": n_patches_raw - n_kept,
+                    "n_excluded": n_patches_raw - n_kept,
                     "level0_width": int(attrs["level0_width"]),
                     "level0_height": int(attrs["level0_height"]),
                     "patch_size_level0": float(attrs["patch_size_level0"]),
@@ -185,7 +233,7 @@ def build_patch_manifest(
             len(h5_paths),
             slide_id,
             n_kept,
-            f" (-{n_patches_raw - n_kept} stain-norm failures)" if n_kept != n_patches_raw else "",
+            f" (-{n_patches_raw - n_kept} excluded)" if n_kept != n_patches_raw else "",
             " (sampled for training)" if need_training else "",
         )
 
@@ -202,6 +250,6 @@ def build_patch_manifest(
     np.save(training_sample_path, training_sample)
 
     logger.info("manifest: %d patches across %d slides", len(manifest), len(slide_meta))
-    if stain_norm_failures_path is not None:
-        logger.info("stain-norm failures excluded: %d patches", n_excluded_total)
+    if n_excluded_total:
+        logger.info("excluded: %d patches", n_excluded_total)
     logger.info("training sample: %s", training_sample.shape)

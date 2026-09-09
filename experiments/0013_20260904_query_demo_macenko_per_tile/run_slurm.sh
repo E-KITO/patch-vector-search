@@ -75,13 +75,17 @@ _ATLAS_ROOT="${PROJECT_ROOT}/data/query/Nonneoplastic-Lesion-Atlas-National-Toxi
 # =====================================================
 
 RUN_MODE="single"
-RUN_COMMAND="python ${PYTHON_PATH} --config config.yml --atlas-root ${_ATLAS_ROOT} --per-image --overwrite"
+
+# --- 所見フォルダ集約版(25 クエリ、図版なし)。2026-09-09: NNL アトラスの誤格納15件を
+#     修正したので、汚染された 9 dir を含む集約 sweep を修正後フォルダで回し直す。
+#     図版・WSI アクセスなしなので短時間。 ---
+RUN_COMMAND="python ${PYTHON_PATH} --config config.yml --atlas-root ${_ATLAS_ROOT} --no-galleries --overwrite"
+
+# --- 画像1枚ずつ版(91 クエリ)。dir 名は画像ファイル名なので誤格納の影響なし ---
+# RUN_COMMAND="python ${PYTHON_PATH} --config config.yml --atlas-root ${_ATLAS_ROOT} --per-image --overwrite"
 
 # --- パス1: 図版なし(top_slides.csv だけ先に出す) ---
 # RUN_COMMAND="python ${PYTHON_PATH} --config config.yml --atlas-root ${_ATLAS_ROOT} --per-image --no-galleries"
-
-# --- 所見フォルダ集約版(25 クエリ)。--per-image を外すだけ ---
-# RUN_COMMAND="python ${PYTHON_PATH} --config config.yml --atlas-root ${_ATLAS_ROOT} --overwrite"
 
 # =====================================================
 # Entry point

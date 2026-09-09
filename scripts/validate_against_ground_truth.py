@@ -21,6 +21,12 @@ hit.
 Usage:
     .venv/bin/python3 scripts/validate_against_ground_truth.py
 
+    # Re-run the background-removal A/B (baseline_v1 = 0018, v1_predeblank = 0002)
+    # without the slow torchstain v2/macenko embeds, to a named file:
+    .venv/bin/python3 scripts/validate_against_ground_truth.py \
+        --pipelines baseline_v1,v1_predeblank \
+        --out outputs/gt_validations/gt_validation_results_deblank_ab.csv
+
     # Or import and add your own pipeline variant (same index, different
     # query embedding — e.g. a new resize mode or tiling stride):
     from validate_against_ground_truth import run_comparison, default_pipelines
@@ -73,15 +79,41 @@ CATEGORIES = {
 }
 
 
-def load_v1_index() -> PatchIndex:
-    """The original, GT-validated-best corpus: uni_v1 (1024-dim), 224px native patches."""
-    exp_dir = Path("outputs/0002_20260808_build_faiss_index/default")
+def load_v1_index(
+    exp_dir: str = "outputs/0018_20260909_build_faiss_index_deblank/default",
+) -> PatchIndex:
+    """The current production index: uni_v1 (1024-dim), 224px native patches, no
+    stain normalization, with the 389,959 slide-background patches (sat_frac <
+    0.10 — 2.12% of the corpus) dropped from the manifest before indexing
+    (experiments/0017 -> 0018, promoted to default 2026-09-09).
+
+    Background removal left the GT best_rank / n_hits_ratio ranking neutral but
+    notably improved the max_similarity ranking in the self-retrieval diagnostic
+    (granular eosinophilic sim_best 20 -> 2). See the "背景パッチ" section of the
+    README, scripts/measure_corpus_blankness.py, and the job 10491 threshold
+    audit.
+
+    The pre-2026-09-09 index (background unfiltered) is
+    outputs/0002_20260808_build_faiss_index/default — pass exp_dir= to use it,
+    or the "v1_predeblank" pipeline (default_pipelines(), off by default). The
+    one-off A/B that promoted 0018 is
+    outputs/gt_validations/gt_validation_results_2026-09-09_deblank_ab_job10495.csv.
+    """
+    exp_dir = Path(exp_dir)
     return PatchIndex.load(
         index_path=exp_dir / "index.faiss",
         manifest_path=exp_dir / "manifest.parquet",
         slide_meta_path=exp_dir / "slide_meta.parquet",
         features_dir=Path("data/trident_processed/20x_224px_0px_overlap/features_uni_v1"),
     )
+
+
+def load_v1_predeblank_index() -> PatchIndex:
+    """The pre-2026-09-09 uni_v1 index, before background removal (experiments/0002,
+    18,368,337 patches incl. ~390k slide background). Kept for reference — the
+    A/B that replaced it is documented in load_v1_index's docstring.
+    """
+    return load_v1_index(exp_dir="outputs/0002_20260808_build_faiss_index/default")
 
 
 def load_v2_index(exp_dir: str = "outputs/0005_20260814_build_faiss_index_v2/default") -> PatchIndex:
@@ -225,10 +257,19 @@ def _embed_v1_macenko_normalized(images) -> np.ndarray:
     return np.concatenate(tiles, axis=0)
 
 
-def default_pipelines() -> dict[str, tuple[PatchIndex, callable]]:
+def default_pipelines(only: set[str] | None = None) -> dict[str, tuple[PatchIndex, callable]]:
     """Each pipeline is (PatchIndex, embed_fn(images) -> (n_tiles, dim) array).
+
+    `only` restricts which pipelines are *constructed* (not just returned), so a
+    focused A/B — e.g. only={"baseline_v1", "v1_predeblank"} — does not pay to
+    load the v2 / macenko indexes and their manifests into memory.
+
     "baseline_v1" (plain tiling, no correction, uni_v1 corpus) is the current
-    recommended default — see lib/query_embedding.py's module-level guidance.
+    recommended default — the background-filtered index (experiments/0018), see
+    load_v1_index and lib/query_embedding.py's module-level guidance.
+    "v1_predeblank" is the pre-2026-09-09 index (experiments/0002, background
+    unfiltered). Off by default — pass only={..., "v1_predeblank"} to re-run the
+    background-removal A/B.
     "baseline_v2" torchstain-normalizes each query image toward
     V2_STAIN_REFERENCE before tiling — the fair comparison, matching how the
     v2 corpus itself was preprocessed (raw, unnormalized v2 queries scored
@@ -239,21 +280,27 @@ def default_pipelines() -> dict[str, tuple[PatchIndex, callable]]:
     normalization on both corpus and query side (see load_v1_macenko_index).
     Only appears once experiments/0010 + its build_faiss_index have been run.
     """
-    pipelines = {
-        "baseline_v1": (
-            load_v1_index(),
-            lambda images: np.concatenate([embed_image_tiles(str(f), tile_size=224) for f in images], axis=0),
-        ),
-    }
-    try:
-        pipelines["baseline_v2"] = (load_v2_index(), _embed_v2_normalized)
-    except (FileNotFoundError, RuntimeError):
-        # faiss.read_index raises RuntimeError (not FileNotFoundError) for a missing file.
-        print("NOTE: uni_v2 index not found (run experiments/0004+0005 first) — skipping baseline_v2")
-    try:
-        pipelines["v1_macenko"] = (load_v1_macenko_index(), _embed_v1_macenko_normalized)
-    except (FileNotFoundError, RuntimeError):
-        print("NOTE: uni_v1 Macenko index not found (run experiments/0010 + its build_faiss_index) — skipping v1_macenko")
+    _plain_tiling = lambda images: np.concatenate(
+        [embed_image_tiles(str(f), tile_size=224) for f in images], axis=0
+    )
+    _want = (lambda name: only is None or name in only)
+
+    pipelines: dict[str, tuple[PatchIndex, callable]] = {}
+    if _want("baseline_v1"):
+        pipelines["baseline_v1"] = (load_v1_index(), _plain_tiling)
+    if only is not None and "v1_predeblank" in only:
+        pipelines["v1_predeblank"] = (load_v1_predeblank_index(), _plain_tiling)
+    if _want("baseline_v2"):
+        try:
+            pipelines["baseline_v2"] = (load_v2_index(), _embed_v2_normalized)
+        except (FileNotFoundError, RuntimeError):
+            # faiss.read_index raises RuntimeError (not FileNotFoundError) for a missing file.
+            print("NOTE: uni_v2 index not found (run experiments/0004+0005 first) — skipping baseline_v2")
+    if _want("v1_macenko"):
+        try:
+            pipelines["v1_macenko"] = (load_v1_macenko_index(), _embed_v1_macenko_normalized)
+        except (FileNotFoundError, RuntimeError):
+            print("NOTE: uni_v1 Macenko index not found (run experiments/0010 + its build_faiss_index) — skipping v1_macenko")
     return pipelines
 
 
@@ -330,8 +377,42 @@ def run_comparison(
 
 
 if __name__ == "__main__":
-    df = run_comparison()
-    out_path = Path("outputs/gt_validation_results.csv")
-    out_path.parent.mkdir(exist_ok=True)
-    df.to_csv(out_path, index=False)
-    print(f"\nwrote {out_path}")
+    import argparse
+
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument(
+        "--pipelines",
+        default=None,
+        help="comma-separated subset of default_pipelines() to run "
+        "(e.g. 'baseline_v1,v1_predeblank' for the background-removal A/B without "
+        "the slow torchstain v2/macenko embeds). Default: all available.",
+    )
+    ap.add_argument(
+        "--out",
+        type=Path,
+        default=Path("outputs/gt_validation_results.csv"),
+        help="output CSV (default: %(default)s). Back up the existing file first "
+        "if it holds a baseline you want to keep — this overwrites it.",
+    )
+    ap.add_argument("--nprobe", type=int, default=64)
+    args = ap.parse_args()
+
+    if args.pipelines:
+        want = [p.strip() for p in args.pipelines.split(",") if p.strip()]
+        pipelines = default_pipelines(only=set(want))
+        missing = [p for p in want if p not in pipelines]
+        if missing:
+            raise SystemExit(
+                f"requested pipeline(s) not available: {missing} "
+                f"(have: {sorted(pipelines)})"
+            )
+        pipelines = {p: pipelines[p] for p in want}
+    else:
+        pipelines = default_pipelines()
+
+    df = run_comparison(pipelines, nprobe=args.nprobe)
+    args.out.parent.mkdir(exist_ok=True)
+    df.to_csv(args.out, index=False)
+    print(f"\nwrote {args.out}")

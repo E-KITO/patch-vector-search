@@ -72,20 +72,25 @@ def _normalize_rows(x: np.ndarray) -> np.ndarray:
     return x / norms
 
 
-def _is_blank_tile(crop: Image.Image, mean_threshold: float = 240.0, std_threshold: float = 8.0) -> bool:
-    """A tile is near-uniform white slide background (not tissue) if it's
-    both bright and has almost no pixel variation. Measured necessary: a
-    grid tiling of a large image inevitably includes margin/background
-    tiles (e.g. the corners of an NTP atlas figure with white padding), and
-    a blank query tile can score deceptively *high* approximate similarity
-    against blank background regions in the corpus (real slide background
-    is a small, tight, easy-to-quantize region of UNI embedding space) —
-    on one query this let 3/54 blank tiles dominate the top-4 reranked
-    candidates and produced an all-background 'match' result with
-    similarity ~0.8, indistinguishable from a real hit without visual
-    inspection."""
-    arr = np.asarray(crop, dtype=np.float32)
-    return bool(arr.mean() > mean_threshold and arr.std() < std_threshold)
+def _is_blank_tile(crop: Image.Image) -> bool:
+    """A tile is slide background (not tissue) if almost none of its pixels
+    carry real stain colour — the same criterion as the corpus-side filter
+    (lib.patch_blankness.is_background, experiments/0017): background is bright
+    *and unstained*, whereas pale tissue is bright but still stained. The
+    earlier bright + low-pixel-variance rule missed roughly half the corpus's
+    background for exactly that reason (jobs 9983 / 10491, README "背景パッチ").
+
+    Measured necessary: a grid tiling of a large query image inevitably
+    includes margin/background tiles (e.g. the white padding round an NTP
+    atlas figure), and a blank query tile can score deceptively *high*
+    approximate similarity against the corpus's own tight, easy-to-quantize
+    background region — on one query this let 3/54 blank tiles dominate the
+    top-4 reranked candidates and produce an all-background 'match' at
+    similarity ~0.8, indistinguishable from a real hit without inspection.
+    """
+    from lib.patch_blankness import blankness_metrics, is_background
+
+    return bool(is_background(blankness_metrics(crop)["sat_frac"]))
 
 
 def embed_image(

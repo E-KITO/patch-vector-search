@@ -12,6 +12,27 @@ from pathlib import Path
 from PIL import Image
 
 
+def read_patch(
+    slide,
+    coord_x: int,
+    coord_y: int,
+    patch_size_level0: int,
+    target_size: int = 224,
+) -> Image.Image:
+    """crop_patch for an already-open ``openslide.OpenSlide`` handle.
+
+    Lets a caller that iterates every patch of one slide (e.g.
+    scripts/measure_corpus_blankness) open the .svs once instead of once per
+    patch. See crop_patch for the coordinate/size semantics.
+    """
+    region = slide.read_region(
+        (int(coord_x), int(coord_y)), 0, (int(patch_size_level0), int(patch_size_level0))
+    ).convert("RGB")
+    if region.size != (target_size, target_size):
+        region = region.resize((target_size, target_size), Image.LANCZOS)
+    return region
+
+
 def crop_patch(
     slide_id: str,
     coord_x: int,
@@ -45,9 +66,4 @@ def crop_patch(
 
     slide_path = Path(raw_slide_dir) / f"{slide_id}.svs"
     with openslide.OpenSlide(str(slide_path)) as slide:
-        region = slide.read_region(
-            (int(coord_x), int(coord_y)), 0, (patch_size_level0, patch_size_level0)
-        ).convert("RGB")
-    if region.size != (target_size, target_size):
-        region = region.resize((target_size, target_size), Image.LANCZOS)
-    return region
+        return read_patch(slide, coord_x, coord_y, patch_size_level0, target_size)

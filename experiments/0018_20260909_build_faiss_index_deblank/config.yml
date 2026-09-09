@@ -1,0 +1,23 @@
+# ============================================================
+# Experiment Configuration
+# ============================================================
+# - Fixed hyperparameters go here.
+# - Variable dimensions (model, seed, prompt, ...) go in run_slurm.sh GRID_ARGS.
+# - Do NOT hardcode values you intend to sweep.
+# ============================================================
+
+# --- Hyperparameters ---
+seed: 42
+features_dir: "data/trident_processed/20x_224px_0px_overlap/features_uni_v1"
+# 0017_..._build_patch_manifest_deblank の出力(project_root相対)。
+# 0002 の manifest_exp_dir(0001の出力)と異なるのはこの1点のみ:
+# manifest から sat_frac < 0.10 のスライド背景パッチ 389,959 件(全体の2.12%)を
+# 除外済み(17,978,378 / 18,368,337 パッチ)。エンコーダ・パッチサイズ・染色
+# 正規化なし、すべて 0002 と同一。
+manifest_exp_dir: "outputs/0017_20260909_build_patch_manifest_deblank/default"
+nlist: 4096
+pq_m: 64
+pq_nbits: 8
+# faissのOPQMatrixデフォルト(niter=25)は学習ベクトル数に対しほぼ比例して遅くなる
+# (ローカル検証: n=2000,niter=2で約19秒/シングルスレッド)。10に下げて許容範囲に収める。
+opq_niter: 10
