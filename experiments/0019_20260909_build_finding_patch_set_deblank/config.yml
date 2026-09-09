@@ -1,0 +1,63 @@
+# ============================================================
+# Experiment Configuration
+# ============================================================
+# 0019: experiments/0015 の deliver を、背景除去済みコーパス(experiments/0018)
+# で回し直す A/B。0015 との違いは index_exp_dir の1点のみ — encoder(uni_v1)、
+# パッチジオメトリ(224px)、features_dir、探索/後処理パラメータはすべて 0015 と同一。
+#
+# 0018 = 0002 のコーパスから sat_frac < 0.10(実質無染色 = スライド背景・切片
+# エッジ・カバーガラス由来アーティファクト)のパッチ 389,959件(2.12%)を manifest
+# から除いて索引を張り直したもの。UNI はパッチを1枚ずつ独立に埋め込むため
+# 再エンベディング不要(experiments/0017 → 0018、scripts/measure_corpus_blankness.py、
+# job 10491 の閾値監査)。
+#
+# 背景除去の狙いは「配信パッチ集を背景が占拠する」所見の是正:
+#   Degeneration, granular, eosinophilic は job 9962 で配信集の93%が背景だった。
+# GT validation(job 10495)は背景除去に中立だったが、それはベンチが payoff を
+# 測れないため(GT スライドの上位マッチは元々組織)。この deliver 出力を 0015 の
+# 同名 variant と比較するのが payoff テスト。実行後に必ず
+# scripts/random_patch_baseline.py でランダム対照を取ること。
+#
+# 実行履歴(0015): 9701(glycogen@deliver 137枚/30スライド + Hypertrophy@validate)、
+#   9932(Hypertrophy@validate 再実行)、9937/9943(ランダム対照)。
+# ============================================================
+
+# --- Hyperparameters ---
+seed: 42
+
+index_exp_dir: "outputs/0018_20260909_build_faiss_index_deblank/default"
+features_dir: "data/trident_processed/20x_224px_0px_overlap/features_uni_v1"
+raw_slide_dir: "data/moo_collected_tggate_wsi/raw_wsi"
+gt_csv: "data/processed_csv/single_finding_liver.csv"
+
+# --- seed 構成 ---
+# validate モードで seed に回す GT スライドの割合。
+seed_fraction: 0.5
+# 実際に seed に使う GT スライド数の上限。seed スライドが多い所見でクエリタイル数が
+# 膨らむのを抑える。seed_fraction とこの上限のどちらが効いても、**seed に使わ
+# なかった GT スライドは全て hold-out** になる(validate モードの recall 分母)。
+# なお、この上限はコスト制御だけでなく候補プールの品質にも効く: 検索候補は
+# 全クエリ統合後の top-k_candidate_patches という固定窓で、seed スライドの除外は
+# その後に効くため、seed を増やすほど自己類似パッチが窓を埋めて非 seed 候補が
+# 減る(job 9701 Hypertrophy: seed 6枚で 5000 → 367)。安易に緩めないこと。
+max_seed_slides: 6
+# seed スライド 1 枚あたりクエリに使うパッチ数(h5 からランダムサンプル)。
+# クエリタイル数 = これ × min(seed スライド数, max_seed_slides)。
+n_query_patches_per_seed_slide: 120
+
+# --- 検索パラメータ ---
+nprobe: 64
+# rerank_pool: search_similar_patches が FAISS から取る近傍数(= 実効的な探索深度)。
+# seed スライドのパッチをクエリにすると最近傍は seed スライド自身のパッチで
+# ほぼ埋まる(自己類似)ため、非 seed スライドまで届かせるには深くする必要がある
+# (rerank_pool=1000 では top 候補の 98% が seed 由来だった)。0015 と同じ 5000。
+k_candidate_patches: 5000
+rerank_pool: 5000
+max_tiles_reranked: null
+
+# --- productization レイヤー(lib/patch_set.py) ---
+# 類似度の下限。壊死クロップが sim=0.33 のゴミを返した事例のガード。
+sim_floor: 0.65
+nms_radius_patches: 1.5
+max_per_slide: 15
+target_n_patches: 150
