@@ -13,14 +13,16 @@
 # ~16 findings x 最大12 LOO クエリ、1クエリあたり search_top_slides_multi を
 # 1500 パッチ分。実測を見てから MAX_QUERY_SLIDES_PER_FINDING / N_QUERY_PATCHES を調整。
 #
-# 挙動切替(--export):
-#   SRD_INDEX_DIR=outputs/0018_20260909_build_faiss_index_deblank/default
-#       背景除去済みコーパス(experiments/0018)で回す。既定は experiments/0002。
-#       非既定を指定すると出力名に実験IDが付く(self_retrieval_diagnostic_0018.csv)
-#       ので 0002 の記録を上書きしない。
+# 既定は experiments/0018(背景除去済み、現行の既定索引)。出力は
+# self_retrieval_diagnostic.csv。
+#
+# 挙動切替(env-var を sbatch の前に前置):
+#   SRD_INDEX_DIR=outputs/0002_20260808_build_faiss_index/default
+#       背景除去前の索引(experiments/0002)で回す。出力名に実験IDが付く
+#       (self_retrieval_diagnostic_0002.csv)ので既定の記録を上書きしない。
 #
 #   sbatch scripts/adhoc_self_retrieval_diagnostic.sh
-#   sbatch --export=ALL,SRD_INDEX_DIR=outputs/0018_20260909_build_faiss_index_deblank/default scripts/adhoc_self_retrieval_diagnostic.sh
+#   SRD_INDEX_DIR=outputs/0002_20260808_build_faiss_index/default sbatch scripts/adhoc_self_retrieval_diagnostic.sh
 
 set -euo pipefail
 

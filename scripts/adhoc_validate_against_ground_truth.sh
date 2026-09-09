@@ -13,19 +13,19 @@
 # GPUはUNI推論を速くするために確保しているが、lib/query_embedding.pyは
 # GPU無し(cuda利用不可)でも自動的にfloat32のCPU実行にフォールバックする。
 #
-# 挙動切替(--export):
-#   VGT_PIPELINES=baseline_v1,v1_deblank
-#       default_pipelines() の部分集合だけ回す。背景除去A/B(0018)は
-#       baseline_v1 と v1_deblank だけあれば十分で、torchstain を伴う
-#       v2/macenko の遅い埋め込みを省ける。既定は利用可能な全パイプライン。
-#   VGT_OUT=outputs/gt_validations/gt_validation_results_deblank.csv
+# baseline_v1 は 2026-09-09 に背景除去済みインデックス(experiments/0018)へ昇格済み。
+# 既定では baseline_v1 + (存在すれば)baseline_v2 / v1_macenko を回す。
+#
+# 挙動切替(env-var を sbatch の前に前置。--export のカンマ分割を避けるため):
+#   VGT_PIPELINES=baseline_v1,v1_predeblank
+#       default_pipelines() の部分集合だけ回す。背景除去 A/B を再実行するなら
+#       baseline_v1(0018)と v1_predeblank(0002)だけあれば十分で、torchstain を
+#       伴う v2/macenko の遅い埋め込みを省ける。
+#   VGT_OUT=outputs/gt_validations/gt_validation_results_deblank_ab.csv
 #       出力先。既定は outputs/gt_validation_results.csv(上書きされる)。
+#       退避が必要なら別名を渡すこと。
 #
-# ⚠️ 既定の出力 outputs/gt_validation_results.csv には job 10467 の
-#    「背景除去なし・旧クエリフィルタ」baseline_v1 が入っている。3-way比較で
-#    使うので、上書きする前に退避するか VGT_OUT で別名に書き出すこと。
-#
-#   sbatch --export=ALL,VGT_PIPELINES=baseline_v1,v1_deblank,VGT_OUT=outputs/gt_validations/gt_validation_results_deblank_ab.csv scripts/adhoc_validate_against_ground_truth.sh
+#   VGT_PIPELINES=baseline_v1,v1_predeblank VGT_OUT=outputs/gt_validations/gt_validation_results_deblank_ab.csv sbatch scripts/adhoc_validate_against_ground_truth.sh
 
 set -euo pipefail
 

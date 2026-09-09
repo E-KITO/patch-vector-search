@@ -23,13 +23,16 @@ UNIパッチ埋め込みに対するクラスタベースのベクトル検索
   4クラスに分かれ、機能するのは最初の1つだけ。下記「所見の3クラス分け」参照。
   **GT recall だけでは判定を誤るので、0015 の後は必ず
   `scripts/random_patch_baseline.py` でランダム対照を取ること**(下記「ランダム対照による検証」)。
-- **背景パッチ除去(2026-09-09、完了)**: 旧 `_is_blank_tile`(平均輝度>240 かつ 標準偏差<8)は
-  背景の半分以下しか捕まえておらず、manifest に約39万枚の背景パッチが残っていた。
-  彩度基準(`sat_frac < 0.10`、job 10491 の閾値監査で確定)で `lib/patch_blankness.py` に
-  再定義し、`experiments/0017`(manifest、389,959枚 = 2.12% 除外)→ `0018`(FAISS 索引
-  再構築、GPU 再埋め込み不要)を実施。`_is_blank_tile` もクエリ側で同じ彩度基準に統一。
-  **効果**: max_similarity ランキングの自己検索順位が顕著に改善(granular eos の
-  `sim_best` 20→2 等)、n_hits_ratio ランキングと GT 比較は中立。下記「背景パッチ」参照。
+- **背景パッチ除去(2026-09-09、完了・既定昇格)**: 旧 `_is_blank_tile`(平均輝度>240 かつ
+  標準偏差<8)は背景の半分以下しか捕まえておらず、manifest に約39万枚の背景パッチが
+  残っていた。彩度基準(`sat_frac < 0.10`、job 10491 の閾値監査で確定)で
+  `lib/patch_blankness.py` に再定義し、`experiments/0017`(manifest、389,959枚 = 2.12%
+  除外)→ `0018`(FAISS 索引再構築、GPU 再埋め込み不要)を実施。`_is_blank_tile` も
+  クエリ側で同じ彩度基準に統一。**効果**: max_similarity ランキングの自己検索順位が
+  顕著に改善(granular eos の `sim_best` 20→2 等)、n_hits_ratio ランキングと GT 比較は
+  中立、負の影響なし。→ **0018 を既定インデックスに昇格**(`scripts`/notebook の既定、
+  `validate_against_ground_truth.py` の `baseline_v1`)。0002 は「背景除去前」の参照として
+  残す。下記「背景パッチ」参照。
 - **モデル/コーパスの検索天井**: 自己検索診断
   (`scripts/self_retrieval_diagnostic.py`、2026-09-04、2026-09-08にバッチ交絡の扱いを
   拡張、下記「自己検索診断」参照)で、**uni_v1 + 現行コーパスがバッチ交絡(同一化合物・
@@ -227,19 +230,22 @@ scaffold元テンプレートの汎用依存で、このプロジェクトのコ
 
 ## 使い方
 
-前提: `experiments/0001_20260808_build_patch_manifest` →
-`experiments/0002_20260808_build_faiss_index` が実行済みで、
-`outputs/0002_20260808_build_faiss_index/default/` にインデックスがある状態。
+前提: `experiments/0001` → `0002` → `0017_..._build_patch_manifest_deblank` →
+`0018_..._build_faiss_index_deblank` が実行済みで、
+`outputs/0018_20260909_build_faiss_index_deblank/default/` にインデックスがある状態。
+**この 0018(背景除去済み)が 2026-09-09 以降の既定インデックス**(下記「背景パッチ」)。
+背景除去前の索引が要る場合は `outputs/0002_20260808_build_faiss_index/default/`。
 
 ```python
 import numpy as np
 from lib.query_embedding import embed_image_tiles
 from lib.search import PatchIndex
 
+INDEX_DIR = "outputs/0018_20260909_build_faiss_index_deblank/default"
 patch_index = PatchIndex.load(
-    index_path="outputs/0002_20260808_build_faiss_index/default/index.faiss",
-    manifest_path="outputs/0002_20260808_build_faiss_index/default/manifest.parquet",
-    slide_meta_path="outputs/0002_20260808_build_faiss_index/default/slide_meta.parquet",
+    index_path=f"{INDEX_DIR}/index.faiss",
+    manifest_path=f"{INDEX_DIR}/manifest.parquet",
+    slide_meta_path=f"{INDEX_DIR}/slide_meta.parquet",
     features_dir="data/trident_processed/20x_224px_0px_overlap/features_uni_v1",
 )
 
@@ -291,7 +297,8 @@ top_slides = patch_index.search_top_slides_multi(query_vecs, top_n_slides=20)  #
   raw_wsi/`(全1000スライド分の生WSI)に対して既に使える状態(2026-08-20判明、モジュール
   docstringの旧記述は古い)
 - `experiments/0001_..._build_patch_manifest` → `0002_..._build_faiss_index` → `0003_..._query_demo`
-  (この順で依存。**現行の推奨インデックス**、`uni_v1`・1024次元)
+  (この順で依存。`uni_v1`・1024次元。**2026-09-09 以降の既定インデックスは背景除去済みの
+  0018**、下記参照 — 0002 は背景除去前の索引として残す)
 - `experiments/0004_..._build_patch_manifest_v2` → `0005_..._build_faiss_index_v2`
   (`uni_v2`・1536次元・pq_m=64版)→ `0006_..._build_faiss_index_v2_pqm96`
   (同じ元データ、pq_m=96版。詳細は下記「uni_v2コーパスの調査状況」参照)
@@ -316,8 +323,8 @@ top_slides = patch_index.search_top_slides_multi(query_vecs, top_n_slides=20)  #
   結論の交絡かを測る3 tier 診断。詳細は下記「experiments/0016」参照)
 - `experiments/0017_..._build_patch_manifest_deblank` → `0018_..._build_faiss_index_deblank`
   (0001/0002 のコーパスから `sat_frac < 0.10` の背景 389,959 枚を除いた版。エンコーダ・
-  ジオメトリ・OPQ+IVF+PQ ハイパラは 0001/0002 と完全一致。詳細は下記「背景パッチ」参照。
-  既定インデックスに昇格するかは未判断)
+  ジオメトリ・OPQ+IVF+PQ ハイパラは 0001/0002 と完全一致。**2026-09-09 に既定インデックス
+  へ昇格**(`lib`/scripts/notebook の既定、README 各所)。詳細は下記「背景パッチ」参照)
 - `experiments/0019_..._build_finding_patch_set_deblank`(0015 の deliver を 0018 コーパスで
   回し直す A/B。`index_exp_dir` のみ差分。詳細は下記「背景パッチ」参照)
 - `lib/patch_blankness.py` — パッチの blankness 測定(`blankness_metrics`)と背景除外基準
@@ -953,6 +960,31 @@ GT スライドが25枚と多い所見では、chance 比が高く出ても選�
 形態差がある」までしか言わない。glycogen の137枚が本当にグリコーゲン沈着かどうかは、
 依然として病理レビューが必要。
 
+### 背景除去済みコーパスでの再検証(job 10498、experiments/0019、2026-09-09)
+
+背景除去(下記「背景パッチ」)後、対照の母集団が **100% 組織**(0002 では 2.12% が背景)に
+なるので、選別の証拠がまだ立つかを `experiments/0019` の deliver 集合(0015 とほぼ同一)で
+測り直した(`scripts/adhoc_random_patch_baseline.sh` の 0019 ターゲット、`--corpus-dir` を
+0018 に向ける)。
+
+- **glycogen: 84/100(84%)。** 0002 の 91% から微減。誤答16枚のうち14枚が「random を
+  curated と誤判定」= 偽陽性。飽食ラット肝はグリコーゲンに富むパッチが多く、背景を
+  抜いた対照プールは「淡明レース状」の当たりが増えて**ベースラインが上がった**(引き分け
+  にくくなった)ため。**選別自体は依然として明確に効いている。**
+- **ground glass: 判定を取り違えた。** 生の盲検判定は 20/100 = 偶然(50%)から強く外れる
+  **逆相関**。判定者(Claude)が "ground glass appearance" を「濃い硝子様好酸性細胞質」と
+  想定したが、実際の curated 集合は「均質で細かいテクスチャの中等度ピンク」(glycogen より
+  おとなしい空胞化)で、それを "正常寄り" として random 判定していた。100 試行で 20% は
+  H0(50%)から p≪0.001 で外れる → **curated 集合は一貫した識別可能な phenotype を持つ**
+  (ラベルの取り違えであって、選別が効いていないのではない)。curated 例で校正し直すと
+  実効分離能は約80%。ただし **glycogen と ground glass の phenotype は淡明・空胞化肝細胞
+  という点で視覚的に重なり、非専門家(および本モデル)は両者を切り分けられていない**。
+- granular eosinophilic は 0019 で非 seed 候補が5枚しか無く盲検シートに乗らないため対照なし
+  (下記「背景パッチ」の deliver A/B 参照)。
+
+**要点**: 背景除去後も glycogen の選別は明確(84%)。ground glass も選別自体は効いている
+が、"ground glass" という所見ラベルと視覚 phenotype の対応づけは**病理専門家の確認が要る**。
+
 ## job 9962: whole-patch テクスチャ系への展開(2026-09-05)
 
 hypertrophy が不成立と分かったので、残る候補 `Ground glass appearance`(コーパス内4枚)と
@@ -1102,9 +1134,20 @@ n_compounds=2・`batch_dominates_finding_rate`=1.0)。背景除去は誤解を�
 成果物」を正直な「5枚、シグナル不足」に変えた。self_retrieval の `sim_best` 改善は
 GT スライドの順位向上として本物だが、この所見の**配信物**は元々薄い。
 
-ground glass / glycogen(0019)のランダム対照は `scripts/adhoc_random_patch_baseline.sh`
-の 0019 ターゲット(`--corpus-dir outputs/0018_.../default`)で別途取る。granular は
-n=5 で盲検シートに乗らないため対照なし。
+ground glass / glycogen(0019)のランダム対照は取得済み(job 10498、上記「ランダム対照に
+よる検証」の 2026-09-09 追記): 背景除去後も glycogen の選別は明確(判定84%)、ground glass
+も phenotype は識別可能。granular は n=5 で盲検シートに乗らないため対照なし。
+
+### 既定インデックスへの昇格(2026-09-09)
+
+上の3つの A/B(GT 中立、self_retrieval は sim 改善・nhr 不変、deliver は不変〜露呈)で
+**負の影響が無いことが確認できた**ため、0018 を既定インデックスに昇格した:
+`notebooks/01_query_demo.ipynb`、`scripts/self_retrieval_diagnostic.py` /
+`scripts/random_patch_baseline.py` の既定、`scripts/validate_against_ground_truth.py` の
+`baseline_v1`、README 各所。0002 は「背景除去前」の参照として残し、
+`validate_against_ground_truth.py` では `--pipelines baseline_v1,v1_predeblank` で A/B を
+再現できる。完了済みの実験(0003, 0007–0016)の config はそのまま(実行記録として保存)。
+背景除去済みコーパスでの deliver は `experiments/0019` が担う。
 
 ## 所見の3クラス分け(0014 / 0015 / ランダム対照で見えた実データの構造)
 

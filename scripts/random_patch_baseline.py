@@ -44,12 +44,13 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-# Default corpus the random patches are drawn from. Override with --corpus-dir
-# to match whichever index the curated --patch-set was built against — e.g.
-# outputs/0018_..._build_faiss_index_deblank/default for an experiments/0019
-# patch set, so the random control samples the same (background-filtered)
-# population the curated set was drawn from.
-CORPUS_INDEX_DIR = Path("outputs/0002_20260808_build_faiss_index/default")
+# Default corpus the random patches are drawn from — the current production
+# index (experiments/0018, background-filtered; promoted to default 2026-09-09).
+# Override with --corpus-dir to match whichever index the curated --patch-set
+# was built against — e.g. outputs/0002_20260808_build_faiss_index/default for
+# a pre-deblank experiments/0015 patch set — so the random control samples the
+# same population the curated set was drawn from.
+CORPUS_INDEX_DIR = Path("outputs/0018_20260909_build_faiss_index_deblank/default")
 RAW_SLIDE_DIR = Path("data/moo_collected_tggate_wsi/raw_wsi")
 
 DEFAULT_SEED = 42
@@ -71,9 +72,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--corpus-dir", type=Path, default=CORPUS_INDEX_DIR,
         help="Index run_dir whose manifest.parquet / slide_meta.parquet define "
-        "the population the random control is sampled from. Default: %(default)s. "
-        "Set to the index the --patch-set was built against (e.g. "
-        "outputs/0018_..._build_faiss_index_deblank/default for an 0019 set).",
+        "the population the random control is sampled from. Default: %(default)s "
+        "(experiments/0018). Set to the index the --patch-set was built against "
+        "(e.g. outputs/0002_..._build_faiss_index/default for a pre-deblank "
+        "experiments/0014 or 0015 set).",
     )
     p.add_argument(
         "--n", type=int, default=None,

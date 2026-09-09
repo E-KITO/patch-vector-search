@@ -31,10 +31,11 @@ PROJECT_ROOT="/workspace/filesrv02/kito/patch-vector-search"
 # そのスライドからのみサンプルする = 対照ではなく **seed スライドの中身の調査**。
 # 出力される blank 率がそのまま「seed のうち組織が疎な割合」になる。
 #
-# 5番目のフィールド(省略可、既定 outputs/0002_.../default)は --corpus-dir。
-# ランダム対照を引くコーパス。curated 集合を作った索引に合わせること —
-# experiments/0019 の集合なら outputs/0018_20260909_build_faiss_index_deblank/default
-# (背景除去済みの母集団から対照を引かないと A/B が非対称になる)。
+# 5番目のフィールド(省略可、既定 outputs/0018_.../default = 現行の既定索引)は
+# --corpus-dir。ランダム対照を引くコーパス。curated 集合を作った索引に合わせること —
+# 背景除去前の experiments/0014 / 0015 の集合なら
+# outputs/0002_20260808_build_faiss_index/default を明示する
+# (母集団がずれると A/B が非対称になる)。
 #
 # 実行済み:
 #   hypertrophy (job 9937) — 判定精度59%(ベースライン61%)= 区別できず、不成立。

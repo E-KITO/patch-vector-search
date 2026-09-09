@@ -21,10 +21,10 @@ hit.
 Usage:
     .venv/bin/python3 scripts/validate_against_ground_truth.py
 
-    # Background-removal A/B without the slow torchstain v2/macenko embeds
-    # (writes to a named file so the recorded baseline is not overwritten):
+    # Re-run the background-removal A/B (baseline_v1 = 0018, v1_predeblank = 0002)
+    # without the slow torchstain v2/macenko embeds, to a named file:
     .venv/bin/python3 scripts/validate_against_ground_truth.py \
-        --pipelines baseline_v1,v1_deblank \
+        --pipelines baseline_v1,v1_predeblank \
         --out outputs/gt_validations/gt_validation_results_deblank_ab.csv
 
     # Or import and add your own pipeline variant (same index, different
@@ -79,40 +79,25 @@ CATEGORIES = {
 }
 
 
-def load_v1_index() -> PatchIndex:
-    """The original, GT-validated-best corpus: uni_v1 (1024-dim), 224px native patches."""
-    exp_dir = Path("outputs/0002_20260808_build_faiss_index/default")
-    return PatchIndex.load(
-        index_path=exp_dir / "index.faiss",
-        manifest_path=exp_dir / "manifest.parquet",
-        slide_meta_path=exp_dir / "slide_meta.parquet",
-        features_dir=Path("data/trident_processed/20x_224px_0px_overlap/features_uni_v1"),
-    )
-
-
-def load_v1_deblank_index(
+def load_v1_index(
     exp_dir: str = "outputs/0018_20260909_build_faiss_index_deblank/default",
 ) -> PatchIndex:
-    """load_v1_index's corpus minus slide background: identical uni_v1 encoder,
-    224px geometry, no stain normalization, same OPQ+IVF+PQ hyperparameters as
-    0002 — the ONLY change is that the 389,959 patches with sat_frac < 0.10
-    (essentially no stained pixels: slide background, section-edge slivers,
-    coverslip artifact — 2.12% of the corpus) were dropped from the manifest
-    before indexing.
+    """The current production index: uni_v1 (1024-dim), 224px native patches, no
+    stain normalization, with the 389,959 slide-background patches (sat_frac <
+    0.10 — 2.12% of the corpus) dropped from the manifest before indexing
+    (experiments/0017 -> 0018, promoted to default 2026-09-09).
 
-    Rationale: those background patches sit at a moderate similarity to every
-    finding and, being numerous, float to the top of searches for findings with
-    few genuine matches (granular eosinophilic: an earlier run came back 93%
-    background). See scripts/measure_corpus_blankness.py, the job 10491 audit
-    (outputs/measure_corpus_blankness/audit/) that fixed the sat_frac cut at
-    0.10, and experiments/0017 (manifest) -> 0018 (index).
+    Background removal left the GT best_rank / n_hits_ratio ranking neutral but
+    notably improved the max_similarity ranking in the self-retrieval diagnostic
+    (granular eosinophilic sim_best 20 -> 2). See the "背景パッチ" section of the
+    README, scripts/measure_corpus_blankness.py, and the job 10491 threshold
+    audit.
 
-    NOTE: lib.query_embedding._is_blank_tile now applies the same saturation
-    criterion on the query side, so it also changes what baseline_v1 embeds —
-    the pre-change baseline_v1 numbers are the job 10467 run recorded in
-    outputs/gt_validation_results.csv (git history). Compare that against this
-    run's baseline_v1 (query filter only) and v1_deblank (query filter + corpus)
-    to separate the two effects.
+    The pre-2026-09-09 index (background unfiltered) is
+    outputs/0002_20260808_build_faiss_index/default — pass exp_dir= to use it,
+    or the "v1_predeblank" pipeline (default_pipelines(), off by default). The
+    one-off A/B that promoted 0018 is
+    outputs/gt_validations/gt_validation_results_2026-09-09_deblank_ab_job10495.csv.
     """
     exp_dir = Path(exp_dir)
     return PatchIndex.load(
@@ -121,6 +106,14 @@ def load_v1_deblank_index(
         slide_meta_path=exp_dir / "slide_meta.parquet",
         features_dir=Path("data/trident_processed/20x_224px_0px_overlap/features_uni_v1"),
     )
+
+
+def load_v1_predeblank_index() -> PatchIndex:
+    """The pre-2026-09-09 uni_v1 index, before background removal (experiments/0002,
+    18,368,337 patches incl. ~390k slide background). Kept for reference — the
+    A/B that replaced it is documented in load_v1_index's docstring.
+    """
+    return load_v1_index(exp_dir="outputs/0002_20260808_build_faiss_index/default")
 
 
 def load_v2_index(exp_dir: str = "outputs/0005_20260814_build_faiss_index_v2/default") -> PatchIndex:
@@ -268,15 +261,15 @@ def default_pipelines(only: set[str] | None = None) -> dict[str, tuple[PatchInde
     """Each pipeline is (PatchIndex, embed_fn(images) -> (n_tiles, dim) array).
 
     `only` restricts which pipelines are *constructed* (not just returned), so a
-    focused A/B — e.g. only={"baseline_v1", "v1_deblank"} — does not pay to load
-    the v2 / macenko indexes and their manifests into memory.
+    focused A/B — e.g. only={"baseline_v1", "v1_predeblank"} — does not pay to
+    load the v2 / macenko indexes and their manifests into memory.
 
     "baseline_v1" (plain tiling, no correction, uni_v1 corpus) is the current
-    recommended default — see lib/query_embedding.py's module-level guidance.
-    "v1_deblank" is baseline_v1 with the slide-background patches (sat_frac <
-    0.10, 2.12%) dropped from the corpus — same plain-tiling query embedding,
-    same encoder/geometry, see load_v1_deblank_index. Only appears once
-    experiments/0017 + 0018 have been run.
+    recommended default — the background-filtered index (experiments/0018), see
+    load_v1_index and lib/query_embedding.py's module-level guidance.
+    "v1_predeblank" is the pre-2026-09-09 index (experiments/0002, background
+    unfiltered). Off by default — pass only={..., "v1_predeblank"} to re-run the
+    background-removal A/B.
     "baseline_v2" torchstain-normalizes each query image toward
     V2_STAIN_REFERENCE before tiling — the fair comparison, matching how the
     v2 corpus itself was preprocessed (raw, unnormalized v2 queries scored
@@ -295,11 +288,8 @@ def default_pipelines(only: set[str] | None = None) -> dict[str, tuple[PatchInde
     pipelines: dict[str, tuple[PatchIndex, callable]] = {}
     if _want("baseline_v1"):
         pipelines["baseline_v1"] = (load_v1_index(), _plain_tiling)
-    if _want("v1_deblank"):
-        try:
-            pipelines["v1_deblank"] = (load_v1_deblank_index(), _plain_tiling)
-        except (FileNotFoundError, RuntimeError):
-            print("NOTE: v1_deblank index not found (run experiments/0017 + 0018 first) — skipping v1_deblank")
+    if only is not None and "v1_predeblank" in only:
+        pipelines["v1_predeblank"] = (load_v1_predeblank_index(), _plain_tiling)
     if _want("baseline_v2"):
         try:
             pipelines["baseline_v2"] = (load_v2_index(), _embed_v2_normalized)
@@ -396,7 +386,7 @@ if __name__ == "__main__":
         "--pipelines",
         default=None,
         help="comma-separated subset of default_pipelines() to run "
-        "(e.g. 'baseline_v1,v1_deblank' for the background-removal A/B without "
+        "(e.g. 'baseline_v1,v1_predeblank' for the background-removal A/B without "
         "the slow torchstain v2/macenko embeds). Default: all available.",
     )
     ap.add_argument(

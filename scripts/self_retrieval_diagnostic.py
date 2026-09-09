@@ -44,10 +44,10 @@ finding slides rank at least as high (batch_dominates_finding_rate), the
 retrieval is tracking the batch, not the finding, and the measured "ceiling"
 for that finding is not trustworthy.
 
-Output: outputs/gt_validations/self_retrieval_diagnostic.csv (the 0002 baseline).
-A non-default --index-dir appends the experiment id, e.g.
-self_retrieval_diagnostic_0018.csv for the background-filtered corpus, so an
-A/B run never overwrites the baseline.
+Output: outputs/gt_validations/self_retrieval_diagnostic.csv (the default index,
+experiments/0018 background-filtered). A non-default --index-dir appends the
+experiment id, e.g. self_retrieval_diagnostic_0002.csv for the pre-deblank
+index, so an A/B run never overwrites the default.
 """
 from __future__ import annotations
 
@@ -66,12 +66,12 @@ from lib.search import PatchIndex
 
 GT_CSV = Path("data/processed_csv/single_finding_liver.csv")
 FEATURES_DIR = Path("data/trident_processed/20x_224px_0px_overlap/features_uni_v1")
-# Default: the original background-unfiltered uni_v1 index (experiments/0002).
-# --index-dir points this at outputs/0018_..._build_faiss_index_deblank/default
-# (same uni_v1 vectors, minus the 389,959 sat_frac<0.10 slide-background patches
-# experiments/0017 dropped) to measure how much the background removal moves the
-# retrieval ceiling.
-INDEX_EXP_DIR = Path("outputs/0002_20260808_build_faiss_index/default")
+# Default: the current production index — the background-filtered uni_v1 corpus
+# (experiments/0018, promoted to default 2026-09-09; the 389,959 sat_frac<0.10
+# slide-background patches experiments/0017 dropped). --index-dir points this
+# back at outputs/0002_20260808_build_faiss_index/default (background unfiltered)
+# to re-run the pre-deblank comparison.
+INDEX_EXP_DIR = Path("outputs/0018_20260909_build_faiss_index_deblank/default")
 OUT_PATH = Path("outputs/gt_validations/self_retrieval_diagnostic.csv")
 
 SEED = 42
@@ -149,17 +149,18 @@ def main() -> None:
         type=Path,
         default=INDEX_EXP_DIR,
         help="FAISS index run_dir holding index.faiss + manifest.parquet + "
-        "slide_meta.parquet. Default: experiments/0002 (background-unfiltered). "
-        "Use outputs/0018_..._build_faiss_index_deblank/default for the "
-        "background-filtered corpus.",
+        "slide_meta.parquet. Default: experiments/0018 (background-filtered, the "
+        "current production index). Pass "
+        "outputs/0002_20260808_build_faiss_index/default to re-run the "
+        "pre-deblank comparison.",
     )
     ap.add_argument(
         "--out",
         type=Path,
         default=None,
-        help="output CSV. Default: %(default)s -> OUT_PATH, but when --index-dir "
-        "is not the 0002 default the experiment id is appended so an A/B run "
-        "does not overwrite the baseline (e.g. self_retrieval_diagnostic_0018.csv).",
+        help="output CSV. Default: %(default)s -> OUT_PATH for the default index, "
+        "with the experiment id appended for any other --index-dir so an A/B run "
+        "does not overwrite it (e.g. self_retrieval_diagnostic_0002.csv).",
     )
     args = ap.parse_args()
 
