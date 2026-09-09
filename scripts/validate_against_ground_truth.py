@@ -21,6 +21,12 @@ hit.
 Usage:
     .venv/bin/python3 scripts/validate_against_ground_truth.py
 
+    # Background-removal A/B without the slow torchstain v2/macenko embeds
+    # (writes to a named file so the recorded baseline is not overwritten):
+    .venv/bin/python3 scripts/validate_against_ground_truth.py \
+        --pipelines baseline_v1,v1_deblank \
+        --out outputs/gt_validations/gt_validation_results_deblank_ab.csv
+
     # Or import and add your own pipeline variant (same index, different
     # query embedding — e.g. a new resize mode or tiling stride):
     from validate_against_ground_truth import run_comparison, default_pipelines
@@ -76,6 +82,39 @@ CATEGORIES = {
 def load_v1_index() -> PatchIndex:
     """The original, GT-validated-best corpus: uni_v1 (1024-dim), 224px native patches."""
     exp_dir = Path("outputs/0002_20260808_build_faiss_index/default")
+    return PatchIndex.load(
+        index_path=exp_dir / "index.faiss",
+        manifest_path=exp_dir / "manifest.parquet",
+        slide_meta_path=exp_dir / "slide_meta.parquet",
+        features_dir=Path("data/trident_processed/20x_224px_0px_overlap/features_uni_v1"),
+    )
+
+
+def load_v1_deblank_index(
+    exp_dir: str = "outputs/0018_20260909_build_faiss_index_deblank/default",
+) -> PatchIndex:
+    """load_v1_index's corpus minus slide background: identical uni_v1 encoder,
+    224px geometry, no stain normalization, same OPQ+IVF+PQ hyperparameters as
+    0002 — the ONLY change is that the 389,959 patches with sat_frac < 0.10
+    (essentially no stained pixels: slide background, section-edge slivers,
+    coverslip artifact — 2.12% of the corpus) were dropped from the manifest
+    before indexing.
+
+    Rationale: those background patches sit at a moderate similarity to every
+    finding and, being numerous, float to the top of searches for findings with
+    few genuine matches (granular eosinophilic: an earlier run came back 93%
+    background). See scripts/measure_corpus_blankness.py, the job 10491 audit
+    (outputs/measure_corpus_blankness/audit/) that fixed the sat_frac cut at
+    0.10, and experiments/0017 (manifest) -> 0018 (index).
+
+    NOTE: lib.query_embedding._is_blank_tile now applies the same saturation
+    criterion on the query side, so it also changes what baseline_v1 embeds —
+    the pre-change baseline_v1 numbers are the job 10467 run recorded in
+    outputs/gt_validation_results.csv (git history). Compare that against this
+    run's baseline_v1 (query filter only) and v1_deblank (query filter + corpus)
+    to separate the two effects.
+    """
+    exp_dir = Path(exp_dir)
     return PatchIndex.load(
         index_path=exp_dir / "index.faiss",
         manifest_path=exp_dir / "manifest.parquet",
@@ -225,10 +264,19 @@ def _embed_v1_macenko_normalized(images) -> np.ndarray:
     return np.concatenate(tiles, axis=0)
 
 
-def default_pipelines() -> dict[str, tuple[PatchIndex, callable]]:
+def default_pipelines(only: set[str] | None = None) -> dict[str, tuple[PatchIndex, callable]]:
     """Each pipeline is (PatchIndex, embed_fn(images) -> (n_tiles, dim) array).
+
+    `only` restricts which pipelines are *constructed* (not just returned), so a
+    focused A/B — e.g. only={"baseline_v1", "v1_deblank"} — does not pay to load
+    the v2 / macenko indexes and their manifests into memory.
+
     "baseline_v1" (plain tiling, no correction, uni_v1 corpus) is the current
     recommended default — see lib/query_embedding.py's module-level guidance.
+    "v1_deblank" is baseline_v1 with the slide-background patches (sat_frac <
+    0.10, 2.12%) dropped from the corpus — same plain-tiling query embedding,
+    same encoder/geometry, see load_v1_deblank_index. Only appears once
+    experiments/0017 + 0018 have been run.
     "baseline_v2" torchstain-normalizes each query image toward
     V2_STAIN_REFERENCE before tiling — the fair comparison, matching how the
     v2 corpus itself was preprocessed (raw, unnormalized v2 queries scored
@@ -239,21 +287,30 @@ def default_pipelines() -> dict[str, tuple[PatchIndex, callable]]:
     normalization on both corpus and query side (see load_v1_macenko_index).
     Only appears once experiments/0010 + its build_faiss_index have been run.
     """
-    pipelines = {
-        "baseline_v1": (
-            load_v1_index(),
-            lambda images: np.concatenate([embed_image_tiles(str(f), tile_size=224) for f in images], axis=0),
-        ),
-    }
-    try:
-        pipelines["baseline_v2"] = (load_v2_index(), _embed_v2_normalized)
-    except (FileNotFoundError, RuntimeError):
-        # faiss.read_index raises RuntimeError (not FileNotFoundError) for a missing file.
-        print("NOTE: uni_v2 index not found (run experiments/0004+0005 first) — skipping baseline_v2")
-    try:
-        pipelines["v1_macenko"] = (load_v1_macenko_index(), _embed_v1_macenko_normalized)
-    except (FileNotFoundError, RuntimeError):
-        print("NOTE: uni_v1 Macenko index not found (run experiments/0010 + its build_faiss_index) — skipping v1_macenko")
+    _plain_tiling = lambda images: np.concatenate(
+        [embed_image_tiles(str(f), tile_size=224) for f in images], axis=0
+    )
+    _want = (lambda name: only is None or name in only)
+
+    pipelines: dict[str, tuple[PatchIndex, callable]] = {}
+    if _want("baseline_v1"):
+        pipelines["baseline_v1"] = (load_v1_index(), _plain_tiling)
+    if _want("v1_deblank"):
+        try:
+            pipelines["v1_deblank"] = (load_v1_deblank_index(), _plain_tiling)
+        except (FileNotFoundError, RuntimeError):
+            print("NOTE: v1_deblank index not found (run experiments/0017 + 0018 first) — skipping v1_deblank")
+    if _want("baseline_v2"):
+        try:
+            pipelines["baseline_v2"] = (load_v2_index(), _embed_v2_normalized)
+        except (FileNotFoundError, RuntimeError):
+            # faiss.read_index raises RuntimeError (not FileNotFoundError) for a missing file.
+            print("NOTE: uni_v2 index not found (run experiments/0004+0005 first) — skipping baseline_v2")
+    if _want("v1_macenko"):
+        try:
+            pipelines["v1_macenko"] = (load_v1_macenko_index(), _embed_v1_macenko_normalized)
+        except (FileNotFoundError, RuntimeError):
+            print("NOTE: uni_v1 Macenko index not found (run experiments/0010 + its build_faiss_index) — skipping v1_macenko")
     return pipelines
 
 
@@ -330,8 +387,42 @@ def run_comparison(
 
 
 if __name__ == "__main__":
-    df = run_comparison()
-    out_path = Path("outputs/gt_validation_results.csv")
-    out_path.parent.mkdir(exist_ok=True)
-    df.to_csv(out_path, index=False)
-    print(f"\nwrote {out_path}")
+    import argparse
+
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument(
+        "--pipelines",
+        default=None,
+        help="comma-separated subset of default_pipelines() to run "
+        "(e.g. 'baseline_v1,v1_deblank' for the background-removal A/B without "
+        "the slow torchstain v2/macenko embeds). Default: all available.",
+    )
+    ap.add_argument(
+        "--out",
+        type=Path,
+        default=Path("outputs/gt_validation_results.csv"),
+        help="output CSV (default: %(default)s). Back up the existing file first "
+        "if it holds a baseline you want to keep — this overwrites it.",
+    )
+    ap.add_argument("--nprobe", type=int, default=64)
+    args = ap.parse_args()
+
+    if args.pipelines:
+        want = [p.strip() for p in args.pipelines.split(",") if p.strip()]
+        pipelines = default_pipelines(only=set(want))
+        missing = [p for p in want if p not in pipelines]
+        if missing:
+            raise SystemExit(
+                f"requested pipeline(s) not available: {missing} "
+                f"(have: {sorted(pipelines)})"
+            )
+        pipelines = {p: pipelines[p] for p in want}
+    else:
+        pipelines = default_pipelines()
+
+    df = run_comparison(pipelines, nprobe=args.nprobe)
+    args.out.parent.mkdir(exist_ok=True)
+    df.to_csv(args.out, index=False)
+    print(f"\nwrote {args.out}")

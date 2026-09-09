@@ -44,10 +44,14 @@ finding slides rank at least as high (batch_dominates_finding_rate), the
 retrieval is tracking the batch, not the finding, and the measured "ceiling"
 for that finding is not trustworthy.
 
-Output: outputs/gt_validations/self_retrieval_diagnostic.csv
+Output: outputs/gt_validations/self_retrieval_diagnostic.csv (the 0002 baseline).
+A non-default --index-dir appends the experiment id, e.g.
+self_retrieval_diagnostic_0018.csv for the background-filtered corpus, so an
+A/B run never overwrites the baseline.
 """
 from __future__ import annotations
 
+import argparse
 import sys
 import time
 from pathlib import Path
@@ -62,6 +66,11 @@ from lib.search import PatchIndex
 
 GT_CSV = Path("data/processed_csv/single_finding_liver.csv")
 FEATURES_DIR = Path("data/trident_processed/20x_224px_0px_overlap/features_uni_v1")
+# Default: the original background-unfiltered uni_v1 index (experiments/0002).
+# --index-dir points this at outputs/0018_..._build_faiss_index_deblank/default
+# (same uni_v1 vectors, minus the 389,959 sat_frac<0.10 slide-background patches
+# experiments/0017 dropped) to measure how much the background removal moves the
+# retrieval ceiling.
 INDEX_EXP_DIR = Path("outputs/0002_20260808_build_faiss_index/default")
 OUT_PATH = Path("outputs/gt_validations/self_retrieval_diagnostic.csv")
 
@@ -74,11 +83,11 @@ K_CANDIDATES = 8000
 HIT_KS = (10, 50)
 
 
-def load_v1_index() -> PatchIndex:
+def load_v1_index(index_exp_dir: Path = INDEX_EXP_DIR) -> PatchIndex:
     return PatchIndex.load(
-        index_path=INDEX_EXP_DIR / "index.faiss",
-        manifest_path=INDEX_EXP_DIR / "manifest.parquet",
-        slide_meta_path=INDEX_EXP_DIR / "slide_meta.parquet",
+        index_path=index_exp_dir / "index.faiss",
+        manifest_path=index_exp_dir / "manifest.parquet",
+        slide_meta_path=index_exp_dir / "slide_meta.parquet",
         features_dir=FEATURES_DIR,
     )
 
@@ -132,8 +141,40 @@ def ranks_of(ranked_slides: list[str], targets: set[str]) -> dict:
 
 
 def main() -> None:
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument(
+        "--index-dir",
+        type=Path,
+        default=INDEX_EXP_DIR,
+        help="FAISS index run_dir holding index.faiss + manifest.parquet + "
+        "slide_meta.parquet. Default: experiments/0002 (background-unfiltered). "
+        "Use outputs/0018_..._build_faiss_index_deblank/default for the "
+        "background-filtered corpus.",
+    )
+    ap.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="output CSV. Default: %(default)s -> OUT_PATH, but when --index-dir "
+        "is not the 0002 default the experiment id is appended so an A/B run "
+        "does not overwrite the baseline (e.g. self_retrieval_diagnostic_0018.csv).",
+    )
+    args = ap.parse_args()
+
+    if args.out is not None:
+        out_path = args.out
+    elif args.index_dir == INDEX_EXP_DIR:
+        out_path = OUT_PATH
+    else:
+        exp_tag = args.index_dir.parent.name.split("_")[0] or "alt"
+        out_path = OUT_PATH.with_name(f"{OUT_PATH.stem}_{exp_tag}.csv")
+
     rng = np.random.default_rng(SEED)
-    pi = load_v1_index()
+    pi = load_v1_index(args.index_dir)
+    print(f"index:  {args.index_dir}")
+    print(f"output: {out_path}")
     n_corpus = len(pi.slide_meta)
     corpus_slides = set(pi.slide_meta.index.astype(str))
 
@@ -284,10 +325,10 @@ def main() -> None:
         )
 
     df = pd.DataFrame(rows)
-    OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(OUT_PATH, index=False)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(out_path, index=False)
     print(f"\nTOTAL: {time.time() - t_all:.1f}s")
-    print(f"wrote {OUT_PATH}")
+    print(f"wrote {out_path}")
 
 
 if __name__ == "__main__":

@@ -12,12 +12,25 @@
 # (クエリベクトルは h5 の格納特徴量をそのまま読む)ので GPU 不要・CPU のみ。
 # ~16 findings x 最大12 LOO クエリ、1クエリあたり search_top_slides_multi を
 # 1500 パッチ分。実測を見てから MAX_QUERY_SLIDES_PER_FINDING / N_QUERY_PATCHES を調整。
+#
+# 挙動切替(--export):
+#   SRD_INDEX_DIR=outputs/0018_20260909_build_faiss_index_deblank/default
+#       背景除去済みコーパス(experiments/0018)で回す。既定は experiments/0002。
+#       非既定を指定すると出力名に実験IDが付く(self_retrieval_diagnostic_0018.csv)
+#       ので 0002 の記録を上書きしない。
+#
+#   sbatch scripts/adhoc_self_retrieval_diagnostic.sh
+#   sbatch --export=ALL,SRD_INDEX_DIR=outputs/0018_20260909_build_faiss_index_deblank/default scripts/adhoc_self_retrieval_diagnostic.sh
 
 set -euo pipefail
 
 PROJECT_ROOT="/workspace/filesrv02/kito/patch-vector-search"
 
+RUN_ARGS=""
+if [ -n "${SRD_INDEX_DIR:-}" ]; then RUN_ARGS="${RUN_ARGS} --index-dir ${SRD_INDEX_DIR}"; fi
+
 echo "Running scripts/self_retrieval_diagnostic.py on $(hostname) ..."
+echo "RUN_ARGS: ${RUN_ARGS}"
 
 if command -v apptainer &>/dev/null && [ -n "${SIF_PATH:-}" ] && [ -f "${SIF_PATH}" ]; then
     apptainer exec \
@@ -26,13 +39,13 @@ if command -v apptainer &>/dev/null && [ -n "${SIF_PATH:-}" ] && [ -f "${SIF_PAT
             set -euo pipefail
             source ${PROJECT_ROOT}/.venv/bin/activate
             cd ${PROJECT_ROOT}
-            python scripts/self_retrieval_diagnostic.py
+            python scripts/self_retrieval_diagnostic.py ${RUN_ARGS}
         "
 else
     echo "⚠️ Apptainer not found or SIF_PATH not set. Running on host system."
     source "${PROJECT_ROOT}/.venv/bin/activate"
     cd "${PROJECT_ROOT}"
-    python scripts/self_retrieval_diagnostic.py
+    python scripts/self_retrieval_diagnostic.py ${RUN_ARGS}
 fi
 
-echo "Done. Results written to outputs/gt_validations/self_retrieval_diagnostic.csv"
+echo "Done. Results written under outputs/gt_validations/ (self_retrieval_diagnostic.csv, or _<expid>.csv for a non-default --index-dir)."
