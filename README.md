@@ -46,6 +46,9 @@ UNIパッチ埋め込みに対するクラスタベースのベクトル検索
   コーパス内スライドが1化合物しかなく自己検索で天井を測れないため、ドメインギャップ説の
   直接的な裏付けは無い(下記「自己検索診断」発見5)。今後の定量評価は自己検索診断のほうが
   交絡が少なく所見カバレッジも広い(7 → 16所見)が、バッチ交絡には引き続き注意。
+  なお、Kupffer クエリフォルダには修正前(〜2026-09-09)Hypertrophy 図版3枚
+  (うち正常肝2枚)が混入しており、過去の Kupffer の低迷はこの汚染も一因の可能性がある
+  (下記「評価に使ったデータとその限界」の誤格納の項)。修正後の再評価が必要。
 - **未解決**: アトラス図版のドメインギャップの詰め方、融合壊死・髄外造血の表現
   (uni v2等)。「今後やること」参照。
 
@@ -54,9 +57,24 @@ UNIパッチ埋め込みに対するクラスタベースのベクトル検索
 Ground truth比較(`scripts/validate_against_ground_truth.py`)のクエリ画像は、
 `data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver/`に置いた
 **NTP(National Toxicology Program)の非腫瘍性病変アトラス(NNL)**から取得した、
-各所見カテゴリの代表的な掲載図版(26カテゴリ・94枚、1所見あたり1〜8枚)。
+各所見カテゴリの代表的な掲載図版(26カテゴリ・91枚、1所見あたり1〜8枚)。
 
 以下の限界を踏まえて結果を解釈すること:
+
+- **【2026-09-09 修正】クエリ図版フォルダに15件の誤格納があった。** `image_id` を
+  atlas ページに照合したところ、Necrosis の図版6枚が `Hyperplasia, Nodular` /
+  `Hypertrophy` フォルダに、Hypertrophy の図版5枚が `Kupffer` / `Intrahepatocellular
+  Erythrocytes` フォルダに、ほか Inflammation 2枚・Focus 2枚が別フォルダに入っていた。
+  2026-09-09 に全件を正しいフォルダへ移動し、重複コピー3件(` (1).jpg`)を削除した
+  (94→91枚、対応表は `data/query/nnl_liver_atlas_misfiled.csv`、経緯は
+  `data/query/nnl_liver_atlas_README.md`)。**この修正より前に回した
+  `scripts/validate_against_ground_truth.py` / `experiments/0014` のアトラスクエリのうち、
+  Necrosis(修正前はフォルダに10枚中4枚しか無かった)・Hypertrophy(修正前は5枚 = 本物4枚
+  + Necrosis 図版1枚混入、本来の fig 1–4,6 は他フォルダに散逸)・Kupffer(修正前は4枚 =
+  本物1枚 + Hypertrophy 図版3枚、うち2枚は正常肝)は汚染されたクエリセットで
+  評価されている。** Glycogen・Increased mitosis・Hematopoiesis・封入体は影響なし。
+  0014 は glycogen・mitosis でしか実行していないため直接の影響は無いが、Kupffer 等で
+  再実行する場合は修正後のフォルダを使うこと。
 
 - **アトラス画像1枚は所見部位を含む図版全体であり、所見が写っているのは画像の一部分に
   過ぎない**(矢印注釈・番号ラベル・周囲の正常組織や余白を含む、1800x1200px程度の
@@ -666,7 +684,8 @@ manifest → スライド別コンタクトシート)を載せる。0009 系の�
 ### experiments/0014: NNL アトラス図版を seed に(2026-09-04、否定的)
 
 `Deposit, glycogen`(アトラス図版4枚)と `Increased mitosis`(同1枚)で実行。
-各150枚出力したが**代表パッチ集としては不成立**:
+各150枚出力したが**代表パッチ集としては不成立**(この2所見のクエリフォルダは
+2026-09-09 に判明した誤格納15件の影響を受けていないので、下記の結論は有効):
 
 - glycogen: 最終150枚が**88スライドに拡散**、うち GT 陽性は 1/6 スライドのみ。
 - mitosis: 150枚が150スライドに1枚ずつ(最大限に拡散)、GT 陽性 4/10 スライド。
