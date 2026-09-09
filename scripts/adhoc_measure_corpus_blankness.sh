@@ -26,9 +26,17 @@
 #       さらに outputs/measure_corpus_blankness/_progress.json を毎スライド更新するので
 #       `cat outputs/measure_corpus_blankness/_progress.json` でいつでも状況が見える。
 #
-# 初回は下の smoke test 行(--limit 5)で 1スライドあたりの所要時間と filesrv02 の
-# I/O 速度を確認してから、フル投入するのが安全。ステージングの効果もそこで見る
-# (--limit 5 を --stage-dir あり/なしで比較)。
+# 挙動は --export で渡す環境変数で切り替える(スクリプトを編集しなくてよい):
+#   MCB_LIMIT=N     最初の N スライドだけ(スモークテスト)
+#   MCB_WORKERS=N   ワーカー数(既定: SLURM_CPUS_PER_TASK、無ければ 16)
+#   MCB_NO_STAGE=1  /scratch へのステージングを無効化(NFS 直読み、比較用)
+#   MCB_OVERWRITE=1 既に per-slide parquet があるスライドも測り直す
+#
+#   フル投入:            sbatch scripts/adhoc_measure_corpus_blankness.sh
+#   スモーク(ステージ):  sbatch --export=ALL,MCB_LIMIT=5,MCB_WORKERS=8 scripts/adhoc_measure_corpus_blankness.sh
+#   スモーク(NFS直):    sbatch --export=ALL,MCB_LIMIT=5,MCB_WORKERS=8,MCB_NO_STAGE=1,MCB_OVERWRITE=1 scripts/adhoc_measure_corpus_blankness.sh
+#
+# 初回はスモーク2本で 1スライドあたりの所要時間とステージングの効果を見てからフル投入。
 
 set -euo pipefail
 
@@ -44,9 +52,11 @@ trap cleanup EXIT
 echo "Running scripts/measure_corpus_blankness.py on $(hostname) ..."
 echo "stage dir: ${STAGE_DIR}"
 
-RUN_ARGS="--workers ${SLURM_CPUS_PER_TASK:-16} --stage-dir ${STAGE_DIR}"
-# smoke test: RUN_ARGS="--workers 8 --limit 5 --stage-dir ${STAGE_DIR}"
-# smoke test (no staging, for comparison): RUN_ARGS="--workers 8 --limit 5"
+RUN_ARGS="--workers ${MCB_WORKERS:-${SLURM_CPUS_PER_TASK:-16}}"
+if [ "${MCB_NO_STAGE:-}" != "1" ]; then RUN_ARGS="${RUN_ARGS} --stage-dir ${STAGE_DIR}"; fi
+if [ -n "${MCB_LIMIT:-}" ]; then RUN_ARGS="${RUN_ARGS} --limit ${MCB_LIMIT}"; fi
+if [ "${MCB_OVERWRITE:-}" = "1" ]; then RUN_ARGS="${RUN_ARGS} --overwrite"; fi
+echo "RUN_ARGS: ${RUN_ARGS}"
 
 if command -v apptainer &>/dev/null && [ -n "${SIF_PATH:-}" ] && [ -f "${SIF_PATH}" ]; then
     apptainer exec \
