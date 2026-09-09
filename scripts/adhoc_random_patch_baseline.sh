@@ -39,21 +39,23 @@ PROJECT_ROOT="/workspace/filesrv02/kito/patch-vector-search"
 # 実行済み:
 #   hypertrophy (job 9937) — 判定精度59%(ベースライン61%)= 区別できず、不成立。
 #     "hypertrophy|outputs/0015_.../hypertrophy__validate/hypertrophy__validate|27537,28741,35367,35374,40637,44299"
-#   glycogen (job 9943) — 判定精度91%(ベースライン50%)= 明確に選別できている。
+#   glycogen (job 9943、0002 corpus) — 判定精度91%(ベースライン50%)= 明確に選別できている。
 #     "glycogen|outputs/0015_.../deposit_glycogen__deliver/deposit_glycogen__deliver|49244,49372,52799,53036,53267,58070"
+#   ground_glass / granular_eos (job 9962、0002 corpus) — granular は候補74枚中48枚が
+#     背景クロップ、最終21枚。
 # =====================================================
 
 TARGETS=(
-    # job 9962 の2所見。どちらも target 150 に未達(113枚 / 21枚)なので、
-    # まず「選別が効いているか」を対照で確かめてから深追いするか決める。
-    "ground_glass|outputs/0015_20260904_build_finding_patch_set_seed_slide/ground_glass_appearance__deliver/ground_glass_appearance__deliver|28113,28140,37688,6371"
-    "granular_eos|outputs/0015_20260904_build_finding_patch_set_seed_slide/degeneration_granular_eosinophilic__deliver/degeneration_granular_eosinophilic__deliver|29935,29965,29969,29984,35058"
-
-    # granular の seed 調査。job 9962 では候補69枚中48枚(70%)が空白クロップとして
-    # 落ちており、クエリ側が組織の疎なパッチを掴んでいる疑いがある。seed 5枚から
-    # 直接サンプルして blank 率と見た目を測る(--only-slides、対照ではない)。
-    # exclude は空にする — seed 自身を見たいので除外してはいけない。
-    "granular_eos_seed|outputs/0015_20260904_build_finding_patch_set_seed_slide/degeneration_granular_eosinophilic__deliver/degeneration_granular_eosinophilic__deliver||29935,29965,29969,29984,35058"
+    # experiments/0019 (背景除去済み 0018 corpus) の deliver 集合に対する対照。
+    # 0015(0002)の対照(glycogen job 9943 = 判定91%)との比較で、背景を抜いた
+    # コーパスでも curated 集合が「一般的な肝パッチ」と区別できるかを見る。
+    # 5番目のフィールド = --corpus-dir: 対照も 0018 の母集団から引く。
+    # exclude は deliver モードなので GT スライド全体。
+    #
+    # granular eosinophilic は 0019 で非 seed 候補が5枚しか無く盲検シートに
+    # 乗らない(job 10497)ので対照は取らない。
+    "ground_glass_0019|outputs/0019_20260909_build_finding_patch_set_deblank/ground_glass_appearance__deliver/ground_glass_appearance__deliver|28113,28140,37688,6371||outputs/0018_20260909_build_faiss_index_deblank/default"
+    "glycogen_0019|outputs/0019_20260909_build_finding_patch_set_deblank/deposit_glycogen__deliver/deposit_glycogen__deliver|49244,49372,52799,53036,53267,58070||outputs/0018_20260909_build_faiss_index_deblank/default"
 )
 
 RUN_CMDS=""
