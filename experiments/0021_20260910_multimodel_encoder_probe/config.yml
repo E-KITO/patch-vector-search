@@ -1,0 +1,36 @@
+# ============================================================
+# experiments/0021: 多モデル埋め込み弁別力プローブ
+# ============================================================
+# uni_v1 の自己検索診断で明確な弱点だった「融合壊死・髄外造血」の2所見
+# (+ 参考: single_cell_necrosis) について、他エンコーダ (hibou_l / uni_v2 /
+# virchow2) が uni_v1 より所見 phenotype を分離できるかを、索引を作らずに測る。
+#
+# 入力: wsi_preprocess が作った probe セット
+#   data/.../probe/embeddings_{encoder}.h5  (N, dim) float32・未正規化・行順 = probe_patches.csv
+#   data/.../probe/probe_patches.csv        row_idx,slide_id,coord_x,coord_y,group,finding_type,exp_id,local_row
+#   data/.../probe/meta_{encoder}.json
+#
+# メトリクス (encoder × finding):
+#   - LOSO AUROC: patch を「その所見 vs confuser」に分類。スコア = 別スライドの
+#     同所見パッチとの平均 top-m コサイン (leave-one-slide-out)。phenotype 分離の主指標。
+#   - precision@k: 所見パッチをクエリに、top-k 近傍のうち同所見の割合 (同一スライド除外)。
+#   - margin: 同所見・別スライド間の平均コサイン − 所見×confuser の平均コサイン。
+#   - batch check: 同所見・同一 EXP_ID 間コサイン vs 同所見・別 EXP_ID 間コサイン。
+#     前者が大きく上回れば「マージンは所見でなくバッチ由来」。
+# ============================================================
+
+seed: 42
+
+probe_dir: "data/trident_processed/20x_224px_0px_overlap/probe"
+encoders:
+  - uni_v1
+  - hibou_l
+  - uni_v2
+  - virchow2
+
+# LOSO AUROC のスコアに使う「別スライド同所見パッチ」の top-m
+auroc_top_m: 10
+# precision@k の k
+precision_k: 10
+# bootstrap 反復数 (スライド単位リサンプルで AUROC の 95% CI を出す)
+n_bootstrap: 1000
