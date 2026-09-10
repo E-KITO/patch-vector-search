@@ -3,13 +3,13 @@
 #SBATCH --partition=large-creator-i
 #SBATCH --output=/workspace/filesrv02/kito/patch-vector-search/logs/0023_20260910_autoscale_revive/%j_0023_20260910_autoscale_revive.out
 #SBATCH --error=/workspace/filesrv02/kito/patch-vector-search/logs/0023_20260910_autoscale_revive/%j_0023_20260910_autoscale_revive.out
-#SBATCH --signal=B:USR1@72
+#SBATCH --signal=B:USR1@144
 #SBATCH --export=ALL
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64g
-#SBATCH --time=2:00:00
+#SBATCH --time=4:00:00
 # 棚上げされていた倍率補正 (embed_image_tiles_auto_scale) を復活させられるか検証する。
 #   (a)     細かい scale centroid を再ビルド (build_scale_reference_centroids)
 #   (a-val) 合成再スケールクエリで 旧 vs 新 centroid の推定誤差を比較 (検索なし)
