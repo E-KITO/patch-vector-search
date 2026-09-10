@@ -43,6 +43,28 @@ def fit_whiten(X: np.ndarray, *, eps: float = 1e-3, fit_sample: int = 200_000,
             "A": A.astype(np.float32), "explained_var_ratio": (eig / eig.sum())[:16]}
 
 
+def fit_whiten_shrink(X: np.ndarray, *, alpha: float = 0.5, eps: float = 1e-3,
+                      fit_sample: int = 200_000, seed: int = 42) -> dict:
+    """収縮白色化: 固有値を平均へ向けて内挿してから逆平方根を取る。
+
+        λ_i^shrunk = α·λ_i + (1−α)·mean(λ)
+        A = V diag(1/√(λ_i^shrunk + ε)) V^T
+
+    α=1 は full ZCA(fit_whiten と一致)、α=0 は全固有値が等しくなり A ∝ I
+    (後段の L2 再正規化で baseline と等価)。`experiments/0025` で full 白色化が
+    小固有値方向を 1/√λ 倍に増幅して atlas クエリのドメインギャップノイズまで
+    増幅したため、その増幅を α で抑える(`experiments/0026`)。
+    """
+    mu, eig, vt = _fit_pca(X, fit_sample, seed)
+    lam_mean = float(eig.mean())
+    eig_shrunk = alpha * eig + (1.0 - alpha) * lam_mean
+    scale = 1.0 / np.sqrt(eig_shrunk + eps)
+    A = (vt.T * scale) @ vt
+    return {"kind": f"whiten_shrink_a{alpha}", "alpha": float(alpha), "eps": float(eps),
+            "mu": mu, "A": A.astype(np.float32),
+            "explained_var_ratio": (eig / eig.sum())[:16]}
+
+
 def fit_abtt(X: np.ndarray, *, d: int = 4, fit_sample: int = 200_000, seed: int = 42) -> dict:
     """all-but-the-top: `A = I − U_d U_d^T`(上位 d 主成分を除去)。"""
     mu, eig, vt = _fit_pca(X, fit_sample, seed)
@@ -67,7 +89,7 @@ def save_transform(params: dict, path: str | Path) -> None:
 def load_transform(path: str | Path) -> dict:
     d = np.load(path, allow_pickle=True)
     out = {k: d[k] for k in d.files}
-    for k in ("eps", "d"):
+    for k in ("eps", "d", "alpha"):
         if k in out:
             out[k] = out[k].item()
     return out
