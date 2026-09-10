@@ -55,6 +55,11 @@ UNIパッチ埋め込みに対するクラスタベースのベクトル検索
   否定的** — どのモデルも CI が重ならないレベルの改善を出せず、髄外造血は全モデル
   chance 以下。天井はエンコーダではなくコーパスカバレッジ/タスク定義の側(下記
   「experiments/0021」)。
+  **【2026-09-10 一部修正】** `experiments/0024` で類似度指標そのもの(L2 正規化コサイン)を
+  ZCA 白色化 / CSLS に替えると、self_retrieval の nhr best_rank median が 86 → 42、
+  **髄外造血 1000(未検出)→ 35、granular 160 → 11、単細胞壊死 124 → 52** と大幅改善。
+  「融合壊死・髄外造血はエンコーダの弱点」の相当部分は**指標の hubness/異方性**だった。
+  コーパスカバレッジで詰んでいる所見(Kupffer 等)は指標では動かない。下記「experiments/0024」。
 - **区切りをつけた路線(いずれもbest_rankの低迷を解消しない)**: IVFクラスタリング仮説、
   手動ROIクロップ、染色正規化(クエリ側・コーパス側・per-tile交絡なしまで、4回検証)、
   **倍率自動補正(`experiments/0022`/`0023` で決着、下記)**。
@@ -1446,6 +1451,65 @@ autoscale_fine_guard / autoscale_fine_noguard)。
     Hypertrophy 30→23 は atlas GT の ±5 ノイズ + 単発の域。
 - **これで倍率スレッドは閉じる**。0022 = `fixed` は ±2x に頑健、0023 = それを超える
   領域の自動推定は out-of-domain クエリでは信用できない。要補正なら既知係数で手動。
+
+## experiments/0024: 類似度指標の再ランク比較 — 異方性除去 / hubness 補正(2026-09-10、jobs 10525/10534)
+
+引き継ぎ資料の「類似度の算出方法はほかにあるのか」。現行の「L2 正規化コサイン」には
+2 つの既知の弱点があり(下記)、それを self_retrieval と同じ土俵(コーパス内 LOO、
+atlas なし、正解 = 同一 FINDING_TYPE の別スライド)で、**FAISS を使わずスライドあたり
+100 パッチの厳密行列**で 9 アーム A/B した(GPU 不要、9 分)。
+
+- **弱点1: 異方性**。UNI 埋め込みは球面に一様分布せず、平均ベクトル μ のノルムが大きい
+  → 任意 2 パッチのコサインが軒並み 0.4-0.6(atlas の「0.5..0.69」の下駄)。ただし
+  **測ってみると軽度** —— 共分散の第1主成分の寄与率は 9.1%、上位8個で 40%(単一の
+  支配的 nuisance 軸は無い)。
+- **弱点2: hubness**。一部のコーパスパッチ(分布中心に近い「ありふれた正常肝細胞」)が
+  多数のクエリの kNN に出現し、所見パッチの枠を奪う(0007-0009 で文書化済み)。
+- **アーム**: `center`(μ 除去)/ `abtt{1,2,4}`(上位 d 主成分を除去、Mu & Viswanath 2018)/
+  `whiten`(ZCA 白色化 `W=(Σ+εI)^{-1/2}`)/ `csls`(Conneau et al. 2018、
+  `csls(q,c)=2cos − r_T(c) − r_S(q)`、r_T = c のコーパス内 kNN 平均コサインで hub にペナルティ)/
+  `csls_abtt2` / `csls_whiten`。
+
+- **所見横断 median best_rank(低いほど良い)**:
+
+  | arm | sim (max_similarity) | **nhr (n_hits_ratio proxy)** |
+  |---|---|---|
+  | cosine(baseline) | 62.5 | 86.2 |
+  | abtt4 | 56.0 | 43.2 |
+  | **whiten** | 52.5 | **42.0** |
+  | csls | **39.5** | 66.8 |
+  | csls_abtt2 | **37.2** | 61.0 |
+  | csls_whiten | 51.5 | 45.5 |
+
+- **発見: 2 つの対策が別々の失敗モードを叩き、併用では stack しない**。
+  - **CSLS は `sim`(max_similarity)ランキングを 62.5 → 37-40**(約 40% 減)。hubness 補正が
+    予測通り効く。
+  - **whiten / abtt4 は `nhr`(n_hits_ratio、本番のランキングキー)を 86 → 42-43**(約 50% 減)。
+  - `csls_whiten` は両者の良いとこ取りにならない(sim 51.5・nhr 45.5)。白色化で
+    hub 構造が既に崩れているため CSLS の伸びしろが消える。
+- **最大の伸びは repo が「壊れている」と分類していた所見**(nhr、best_rank median):
+
+  | finding | cosine | 最良アーム |
+  |---|---|---|
+  | Hematopoiesis, extramedullary | **1000(未検出)** | abtt4: **35** |
+  | Degeneration, granular, eosinophilic | 160 | whiten: **11** |
+  | Single cell necrosis | 124 | csls_whiten: **52** |
+  | Necrosis(凝固壊死) | 48 | abtt4/center: 36 |
+  | Hypertrophy | 41 | whiten: 26 |
+
+  → **「融合壊死・髄外造血はエンコーダの本物の弱点」という自己検索診断の結論は一部修正が
+  必要** —— その相当部分は**エンコーダではなく類似度指標の hubness/異方性**だった。
+  コーパスカバレッジで詰んでいる所見(Kupffer, Lesion NOS, Vacuolization/Alteration
+  cytoplasmic)は全アーム 1000 のまま(想定通り、指標では動かない)。
+- **本番ランキングキーは n_hits_ratio なので `whiten` を採る**。`abtt4`(行列逆計算・ε
+  不要、上位 4 成分を引くだけ)を安価な代替として A/B。回帰リスクは低い(whiten は
+  Swelling 12→13 以外ほぼ中立〜改善)。
+- **留保**: コーパス部分サンプル(100/slide)・nhr は proxy(top-hit_k)・所見あたり
+  ~10 クエリスライドの median(Change eosinophilic は 175〜1000 で振れる)。本番
+  パイプラインでの確認が必須。
+- **次**: `whiten`(または `abtt4`)を **索引再構築時のコーパス変換**として入れ
+  (`experiments/0025` 予定)、`self_retrieval_diagnostic`(フル FAISS)+ atlas GT で
+  再測定。granular を成果物パイプライン(0015/0019、「候補プール崩壊」で棚上げ)で再挑戦。
 
 ## 次の一手(成果物トラック)
 
