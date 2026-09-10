@@ -53,16 +53,18 @@ uni_v1 を明確に上回るモデルがあればフル (Task B) に進む。無
    から `.svs` を除去。
 2. コーパス内スライドに限定: `data/trident_processed/20x_224px_0px_overlap/features_uni_v1/{slide_id}.h5`
    が存在するものだけ。
-3. **陽性スライド**: `FINDING_TYPE` が
-   - `"Necrosis"` → group `necrosis`
-   - `"Single cell necrosis"` → group `single_cell_necrosis`
-   - `"Hematopoiesis"` → group `hematopoiesis`
+3. **陽性スライド**: `FINDING_TYPE` (pandas read_csv でクオート内カンマを正しく扱うこと) が
+   - `"Necrosis"` → group `necrosis` (単一所見×コーパス内で 13 スライド)
+   - `"Single cell necrosis"` → group `single_cell_necrosis` (4 スライド)
+   - `"Hematopoiesis, extramedullary"` → group `hematopoiesis` (3 スライド: 19865 / 45502 / 20370)
    のいずれか、かつ**そのスライドが単一 FINDING_TYPE** (CSV 内でそのスライドに紐づく
-   `FINDING_TYPE` の集合が 1 要素) のものだけ。目安: necrosis ~13、single cell ~4、
-   hematopoiesis ~3 スライド。
-4. **confuser スライド**: 上記 3 グループの FINDING_TYPE を **持たない**コーパススライドから
-   一様ランダムに 60 枚 (seed=42)。group `confuser`。
-5. **各スライドから 100 パッチを一様ランダムサンプル**:
+   `FINDING_TYPE` の集合が 1 要素) のものだけ。self_retrieval_diagnostic.py と同じ定義。
+4. **confuser スライド**: `single_finding_liver.csv` に載っている単一所見コーパススライドの
+   うち、その所見が上記 3 ターゲット以外のもの **全部** (~106 枚、group `confuser`)。
+   全 confuser が既知の別所見を持つのでプールが汚染されにくく、かつ degeneration /
+   change 系など phenotype が壊死に近い hard negative も自然に含まれる。
+   (コーパス 1000 枚全体から引く案は、CSV 外 874 枚に未ラベルの壊死併発が混じりうるので採らない。)
+5. **各スライドから最大 100 パッチを一様ランダムサンプル**:
    - 座標は `data/trident_processed/20x_224px_0px_overlap/features_uni_v1/{slide_id}.h5`
      の行順 (= `patches/{slide_id}_patches.h5` と同順、= manifest 行順) に対応。
      行インデックスをランダムに 100 個引く。
