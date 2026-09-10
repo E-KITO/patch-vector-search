@@ -30,6 +30,7 @@ def build_faiss_index(
     pq_m: int = 64,
     pq_nbits: int = 8,
     opq_niter: int = 10,
+    pretransform: list | None = None,
 ) -> faiss.Index:
     """Train an OPQ+IVF+PQ index on a sample and add every patch vector to it.
 
@@ -59,6 +60,13 @@ def build_faiss_index(
         pq_m: Number of PQ subquantizers (must divide dim).
         pq_nbits: Bits per PQ subquantizer code (256 centroids at nbits=8).
         opq_niter: OPQ rotation-refinement iterations (faiss default is 25).
+        pretransform: Optional list of already-trained faiss.VectorTransform
+            objects to prepend to the index chain (applied to every vector,
+            in list order, before OPQ — and automatically to queries at
+            search time). Used to bake an anisotropy-removing transform
+            (ZCA whitening / all-but-the-top) into the index — see
+            lib.embedding_transform.make_faiss_pretransform and
+            experiments/0025. None = the plain L2-normalized-cosine index.
 
     Returns:
         The trained, populated faiss.Index (also written to index_path).
@@ -76,6 +84,11 @@ def build_faiss_index(
     quantizer = faiss.IndexFlatIP(dim)
     ivfpq = faiss.IndexIVFPQ(quantizer, dim, nlist, pq_m, pq_nbits, faiss.METRIC_INNER_PRODUCT)
     index = faiss.IndexPreTransform(opq_matrix, ivfpq)
+    for vt in reversed(pretransform or []):
+        # prepend_transform pushes to the front, so reverse the list to keep
+        # the caller's order: pretransform[0] ends up applied first.
+        index.prepend_transform(vt)
+        logger.info("prepended pretransform: %s", type(vt).__name__)
 
     logger.info(
         "training index on %d vectors (nlist=%d pq_m=%d pq_nbits=%d opq_niter=%d)",

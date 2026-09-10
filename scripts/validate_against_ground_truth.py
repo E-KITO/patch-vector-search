@@ -405,9 +405,23 @@ if __name__ == "__main__":
         "if it holds a baseline you want to keep — this overwrites it.",
     )
     ap.add_argument("--nprobe", type=int, default=64)
+    ap.add_argument(
+        "--index-dir",
+        type=Path,
+        default=None,
+        help="Run a single 'baseline_v1'-style pipeline (plain tiling, no "
+        "correction) against this FAISS index run_dir instead of the default "
+        "pipeline set. Use for an A/B against an alternative corpus index "
+        "(e.g. experiments/0025's whitened index).",
+    )
     args = ap.parse_args()
 
-    if args.pipelines:
+    if args.index_dir:
+        _plain = lambda images: np.concatenate(
+            [embed_image_tiles(str(f), tile_size=224) for f in images], axis=0
+        )
+        pipelines = {"index": (load_v1_index(str(args.index_dir)), _plain)}
+    elif args.pipelines:
         want = [p.strip() for p in args.pipelines.split(",") if p.strip()]
         pipelines = default_pipelines(only=set(want))
         missing = [p for p in want if p not in pipelines]

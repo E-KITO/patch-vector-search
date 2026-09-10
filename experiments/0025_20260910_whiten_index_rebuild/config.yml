@@ -1,0 +1,47 @@
+# ============================================================
+# experiments/0025: 異方性除去変換を索引にベイクして再構築 + フル測定
+# ============================================================
+# experiments/0024 で、L2 正規化コサインを ZCA 白色化 / all-but-the-top (ABTT) に
+# 替えると self-retrieval の n_hits_ratio best_rank median が 86 → 42、
+# 髄外造血 1000(未検出)→ 35、granular 160 → 11 と大幅改善すると判明した
+# (ただしコーパス部分サンプルの厳密行列・nhr は proxy)。
+#
+# ここでは変換を **FAISS 索引にベイク**して(lib.embedding_transform.make_faiss_pretransform
+# → LinearTransform + NormalizationTransform を index チェーンに prepend、
+# add/search 双方で自動適用)フル 18M パッチで再構築し、本番パイプラインで測る:
+#   Stage 1  outputs/0017 の training_sample.npy から whiten / abtt4 を fit
+#   Stage 2  変種ごとに OPQ+IVF+PQ 索引を再構築(0018 と同一ハイパラ、変換だけ追加)
+#   Stage 3  scripts/self_retrieval_diagnostic.py --index-dir <変種>(フル FAISS)
+#   Stage 4  scripts/validate_against_ground_truth.py --index-dir <変種>(atlas GT)
+#   Stage 5  baseline 0018 と並べた summary.md
+# 各ステージは出力の存在で冪等。TIMEOUT しても再投入で続きから。
+# ============================================================
+
+seed: 42
+
+# 埋め込み(0018/0002 と共有、project_root 相対)。
+features_dir: "data/trident_processed/20x_224px_0px_overlap/features_uni_v1"
+# manifest / slide_meta / training_sample の供給元(背景除去済み、0018 と同じ)。
+manifest_exp_dir: "outputs/0017_20260909_build_patch_manifest_deblank/default"
+# baseline(変換なし・現行既定)。Stage 3/4 の比較対象。
+baseline_index_dir: "outputs/0018_20260909_build_faiss_index_deblank/default"
+
+# --- FAISS ハイパラ(experiments/0018 と完全一致。変換以外は変えない)---
+nlist: 4096
+pq_m: 64
+pq_nbits: 8
+opq_niter: 10
+
+# --- 変換の当てはめ ---
+# training_sample.npy(~500k ベクトル)からさらにこの数だけサンプルして fit。
+fit_sample: 200000
+# ZCA 白色化の正則化(小さい固有値で 1/sqrt(λ) が発散するのを防ぐ)。
+whiten_eps: 0.001
+# ABTT で除去する上位主成分数(0024 で d=4 が最良帯)。
+abtt_d: 4
+
+# 構築・測定する変種。
+variants: ["whiten", "abtt4"]
+
+# atlas GT の nprobe(validate_against_ground_truth.py の既定と同じ)。
+nprobe: 64
