@@ -70,10 +70,10 @@ _ATLAS_ROOT="${PROJECT_ROOT}/data/query/Nonneoplastic-Lesion-Atlas-National-Toxi
 # =====================================================
 
 RUN_MODE="single"
-# 2026-09-10: 対照図版除外 (lib.atlas_figures) を Atrophy/Hypertrophy に反映するため
-# 一時的に --overwrite。全 25 所見が再検索される（変わらない 23 所見はバイト同一）。
-# このリフレッシュ後に --overwrite を外すこと。
-RUN_COMMAND="python ${PYTHON_PATH} --config config.yml --atlas-root ${_ATLAS_ROOT} --overwrite && python ${PROJECT_ROOT}/scripts/build_atlas_report.py --exp-name ${EXP_NAME}"
+# 所見ごとの completion.json ガードで再投入は続きから走る。対照図版除外
+# (lib.atlas_figures) の反映は job 10513 (--overwrite) で完了済み。図版フォルダや
+# クエリパラメータを変えたときだけ一時的に --overwrite を足すこと。
+RUN_COMMAND="python ${PYTHON_PATH} --config config.yml --atlas-root ${_ATLAS_ROOT} && python ${PROJECT_ROOT}/scripts/build_atlas_report.py --exp-name ${EXP_NAME}"
 
 # =====================================================
 # Entry point
