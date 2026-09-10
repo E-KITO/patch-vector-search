@@ -184,6 +184,8 @@ def _base_space(name: str) -> str:
         return "cosine"
     if name == "csls_abtt2":
         return "abtt2"
+    if name == "csls_whiten":
+        return "whiten"
     return name
 
 

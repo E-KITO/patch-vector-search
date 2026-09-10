@@ -60,4 +60,6 @@ csls_k: 10
 # n_hits_ratio proxy: 各クエリベクトルの上位 hit_k コーパスパッチを「hit」とみなす。
 hit_k: 10
 
-arms: ["cosine", "center", "abtt1", "abtt2", "abtt4", "whiten", "csls", "csls_abtt2"]
+arms: ["cosine", "center", "abtt1", "abtt2", "abtt4", "whiten", "csls", "csls_abtt2", "csls_whiten"]
+# csls_whiten: whiten 空間で CSLS。job 10525 で CSLS が sim を、whiten が nhr を
+# 別々に叩くと判明したので、両方の併用を検証する。
