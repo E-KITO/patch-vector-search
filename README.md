@@ -5,11 +5,18 @@ UNIパッチ埋め込みに対するクラスタベースのベクトル検索
 類似する組織パッチと、それを多く含むWSIを検索できる。  
 **最終的な目標は、INHANDやNTPの非腫瘍性病変アトラスのような、所見の代表的なパッチを検索クエリとして使い、TGGATEの大規模なWSIコーパスから同じ所見を引き出してデータベース化すること。**
 
-## 現状(2026-09-09時点)
+## 現状(2026-09-10時点)
 
 - **動くもの**: 任意の画像(1枚〜複数枚)を渡すと、類似パッチ検索とWSI逆引きができる。
   実解像度でのヒットパッチ表示・クエリタイルごとの近似スコアヒートマップ表示も追加済み
   (下記「検索結果の可視化改善とタイル選択バイアスの発見」参照)。
+- **検索結果 Artifact(2026-09-10、`experiments/0020`)**: 初代の「NNL アトラス所見図版 →
+  類似パッチ検索」デモ Artifact を、現行の改善後経路(背景除去 0018 + notebook 01 の探索
+  パラメータ)で作り直した。25所見を `0018` / `0002` の両索引で検索した before/after +
+  成果物ギャラリー + 自己検索診断の総合レポート:
+  https://claude.ai/code/artifact/a34cf5e1-b488-4571-8027-065c20098df3 。
+  発見: 背景除去は max_similarity 上位パッチをほとんど動かさない(効果はスライド単位
+  ランキング側)。下記「experiments/0020」参照。
 - **成果物パイプライン**: `lib/patch_set.py` + `experiments/0015` で、所見の確定スライドを
   seed に**レビュー可能な代表パッチ集**(実解像度パッチ + manifest + スライド別コンタクト
   シート)を出力できる。`Deposit, glycogen` では GT スライドを全除外した deliver モードで
@@ -1220,6 +1227,41 @@ self_retrieval_diagnostic / 0015 の TG-GATEs アームは2軸で違っていた
 `run_slurm.sh` の `PRE_NATIVE_COMMAND` で index + h5 をノードローカル NVMe にステージ
 してから読む(`PVS_INDEX_DIR` / `PVS_FEATURES_DIR` 等)。`USE_LOCAL_SSD_INPUT=1` は
 `data/`(844G)全体を rsync するので使わない(job 10421 はこれで TIMEOUT した)。
+
+## experiments/0020: 初代アトラス検索 Artifact の作り直し(2026-09-10、job 10501)
+
+プロジェクト最初期に作った検索デモ Artifact — NNL アトラスの所見図版をクエリに、
+所見ごとに「クエリタイル行」と「コーパスから引いた上位パッチ行(slide_id / sim)」を
+並べ、「望んでいるほど似ていない画像も多く得られてしまった」で終わっていたもの —
+を、この1か月の改善(背景除去 0018、評価軸の刷新、成果物パイプライン)を反映して
+同じ立て付けで作り直した。
+
+- **スイープ(`experiments/0020` / `experiment.py`、job 10501)**: NNL アトラス25所見を
+  フォルダ単位で集約(所見フォルダ = 1クエリ、フォルダ内の全図版を統合)。
+  `uni_v1` plain タイリング(染色正規化なし = 現行既定経路)、探索は
+  `notebooks/01_query_demo.ipynb` の推奨値(`rerank_pool=200` / `max_tiles_reranked=12`)。
+  各所見を **`0018`(背景除去済み・現行既定)と `0002`(背景除去前)の両索引**で検索し、
+  上位10パッチを raw WSI から実解像度クロップ。所見ごとに `query_tiles/` `hits_deblank/`
+  `hits_predeblank/` `finding.json` を出力。25/25 成功・クロップ失敗0件、約10分。
+- **レポート(`scripts/build_atlas_report.py`、run_slurm.sh が続けて呼ぶ)**: スイープ出力 +
+  `outputs/0019`(glycogen/ground glass/granular の deliver 成果物)+ 自己検索診断 CSV
+  (`self_retrieval_diagnostic_{0018,0002_predeblank}.csv`)から self-contained な
+  `outputs/0020_.../report.html` を生成(画像は base64 JPEG 埋め込み、外部依存は
+  Google Fonts のみ)。Artifact: https://claude.ai/code/artifact/a34cf5e1-b488-4571-8027-065c20098df3
+- **発見: 背景除去は max_similarity 上位パッチをほとんど動かさない**。所見別の 0018 vs 0002
+  上位10枚は、組織マッチが強い所見(融合壊死・脂肪変性)では**完全一致**、背景の彩度帯に
+  近い所見(色素沈着・クッパー細胞増殖)では**上位が入れ替わる**という幅。背景除去の主効果は
+  ここではなく**スライド単位の `n_hits_ratio` ランキング**に出る(「背景パッチ」節の
+  self_retrieval `sim_best_rank` 改善と整合。max_similarity 上位パッチは元々ほぼ組織)。
+- sim レンジは 0.47〜0.71 で初代 Artifact(0.5〜0.69)と同水準。「あまり似ていない」ままの
+  所見が多いのは、多くの所見で 0018 の上位が「所見と無関係な正常組織」で埋まるため —
+  モデルの表現力ではなく **アトラス→TG-GATEs のドメインギャップ**が主因(0014 の #1 ブロッカー、
+  0016 で補強)。
+- **運用メモ**: `USE_LOCAL_SSD_OUTPUT=0`(NFS 直書き)。=1 にすると「スイープをスキップして
+  レポートだけ作り直す」再実行で `build_atlas_report.py` が空のスクラッチを見て所見出力を
+  取りこぼす(job 10503 で発生、10504 で修正)。`experiment.py` は全所見完了済みなら索引
+  ロードも省くので、レポートのみの再実行は1〜2分。25所見完了済みなら `PRE_NATIVE` の
+  72G ステージングもスキップする。
 
 ## 次の一手(成果物トラック)
 
