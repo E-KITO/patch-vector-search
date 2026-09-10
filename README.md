@@ -56,14 +56,22 @@ UNIパッチ埋め込みに対するクラスタベースのベクトル検索
   chance 以下。天井はエンコーダではなくコーパスカバレッジ/タスク定義の側(下記
   「experiments/0021」)。
 - **区切りをつけた路線(いずれもbest_rankの低迷を解消しない)**: IVFクラスタリング仮説、
-  手動ROIクロップ、染色正規化(クエリ側・コーパス側・per-tile交絡なしまで、4回検証)。
-- **倍率補正**: `experiments/0022`(2026-09-10、job 10516)の合成再スケール評価で、
-  **UNI は ±2x の倍率ずれには頑健**(`fixed` パイプラインが median 順位 1〜2 を維持)、
-  **2x を超えると崩れるがそれはスケール由来で `embed_image_tiles_auto_scale` の点推定
-  補正で回復する**(oracle とほぼ同等)と判明。棚上げ時の「atlas GT 7/7 で悪化」は
-  真倍率不明・コンテンツ混在の atlas 図版で測ったため。→ **fullなスケール探索は不要、
-  centroid を細かくして autoscale を復活 + r≈1 ガードバンド + atlas GT 再測定**が次の一手
-  (下記「experiments/0022」)。
+  手動ROIクロップ、染色正規化(クエリ側・コーパス側・per-tile交絡なしまで、4回検証)、
+  **倍率自動補正(`experiments/0022`/`0023` で決着、下記)**。
+- **倍率(magnification)— 決着**:
+  - `experiments/0022`(job 10516): 正解既知の合成再スケールクエリで、**`fixed`
+    パイプラインは ±2x の倍率ずれに頑健**(median 順位 1〜2)。2x を超えると崩れるが、
+    それは純粋なスケール由来(oracle 補正でほぼ完全回復)。
+  - `experiments/0023`(job 10517): 細かい centroid + ガードバンドで
+    `embed_image_tiles_auto_scale` を復活できるか atlas GT で再測定 → **否定的**。
+    FM centroid のスケール推定は**病理テクスチャの粗さを低倍率と誤認**し
+    (グリコーゲン沈着・肥大肝細胞など)、しかも**推定が bimodal(0.5 か 2.0、1.0 付近を
+    まず出さない)なのでガードバンドが不発**。細粒度化は synthetic の推定 median は
+    改善するが atlas GT では旧 centroid より悪化(1勝2敗 vs 2勝1敗)。**動く所見
+    Glycogen の best_rank が 7 → 100+ に破壊される**のが致命的。
+  - **結論**: 倍率補正はコアパイプラインに入れない(棚上げ継続)。クエリはコーパスの
+    20x から ±2x(概ね 10〜40x)以内で与えること。特定クエリが明らかに要補正なら
+    **既知の係数で手動リサイズ**して no-correction と A/B する(自動推定は信用しない)。
 - **アトラスGT比較の位置づけ**: アトラス図版をクエリにする
   `scripts/validate_against_ground_truth.py` のbest_rankが悪いカテゴリの主因は、
   モデルの表現力ではなく **アトラス→TG-GATEsのドメインギャップ + 図版が所見と無関係な
@@ -1389,14 +1397,55 @@ self_retrieval_diagnostic / 0015 の TG-GATEs アームは2軸で違っていた
     (その帯は `fixed` が既に良いため)が、**centroid に 0.71 / 1.41 を足すべき**。
   - r>1(拡大クエリ、補正係数 1/r<1)は centroid 下限 0.5 で頭打ち。r=2 は 1/r=0.5 で
     たまたま合うが、それ以上の拡大は当てられない。
-- **次の一手**: (a) `embed_image_tiles_auto_scale` の centroid を {0.35,0.5,0.71,1,1.41,2,2.83}
-  相当に細かくして再ビルド、(b) 推定が 1.0 近傍のときは補正しないガードバンド
-  (|log scale| < log 1.6 なら素通し。r≈1 では補正は害にしかならないため)、
-  (c) その状態で atlas GT を再測定し、棚上げ時の悪化が「推定器の誤射」だったのか
-  「補正は正しいが別要因(ドメインギャップ)で retrieval が悪いだけ」だったのかを切り分け。
 - **この測定の限界**: 合成クエリは単一倍率かつ検索対象と同一スライド由来(in-distribution・
   完全一致パッチが必ず存在する易しいケース)なので、順位の絶対値は best-case。
-  アーム間の相対比較が目的なのでそこは問題ない。
+  アーム間の相対比較が目的なのでそこは問題ない。→ 実際の atlas 図版でどうかは
+  `experiments/0023` で検証(下記、否定的)。
+
+## experiments/0023: autoscale 復活の検証 — 否定的、倍率補正は決着(2026-09-10、job 10517)
+
+0022 の「点推定補正で >2x を回復できる」を受けて、`embed_image_tiles_auto_scale` を
+(a) centroid 細粒度化 + (b) ガードバンド付きで復活できるか、(c) atlas GT 7 カテゴリで
+再測定した(0018 索引、対照図版除外済み、4 アーム: baseline / autoscale_orig /
+autoscale_fine_guard / autoscale_fine_noguard)。
+
+- **(a) centroid 再ビルド**: `build_scale_reference_centroids` を
+  scales `{0.35,0.5,0.71,1,1.41,2,2.83}` で(20 スライド × 4 サンプル)。
+  `outputs/0023_.../revive/scale_centroids_fine.npz`(**昇格せず**)。
+- **(a-val) 推定精度**(合成再スケールクエリ・検索なし、旧 vs 新 centroid の
+  `|log(scale_est / (1/r))|` median): 全体 median は旧 0.049 → 新 0.010 と改善するが、
+  **内訳はまだら** — 新は r=0.71/2.83 を直す一方 r=0.5 を新たに悪化させ(0.00→0.35)、
+  r=1.41 は両方 0.34 のまま。細粒度化で個々の投票のノイズが増える。
+- **(c) atlas GT best_rank(baseline → 各アーム)**:
+
+  | category | n_gt | baseline | orig | fine_guard | fine_noguard |
+  |---|---|---|---|---|---|
+  | Hypertrophy | 25 | 30 | **23** | 30 | 30 |
+  | Single cell necrosis | 4 | 14 | 13 | 13 | 13 |
+  | Increased mitosis | 10 | 10 | 9 | 9 | 9 |
+  | **Deposit, glycogen** | 6 | **7** | **113** | **101** | **101** |
+  | Hematopoiesis, extramedullary | 3 | 28 | 25 | **51** | **51** |
+  | Proliferation, Kupffer cell | 2 | 78 | **33** | **33** | **33** |
+  | Inclusion body | 1 | 475 | 消失 | 消失 | 消失 |
+
+  勝敗(±5 位はノイズで引き分け): orig **2勝1敗**、fine_guard/fine_noguard **1勝2敗**
+  (+ Inclusion body は全アームで GT スライドが top-1000 から消失、found 1→0)。
+
+- **結論: 否定的。autoscale は棚上げ継続。** 決め手:
+  - **推定器は病理テクスチャの粗さを低倍率と誤認する**。Glycogen 図版の推定スケールは
+    `[1.0, 0.5, 0.5, 0.5]`(= 「2x 拡大されている」)で 2x 縮小補正がかかるが、baseline
+    best_rank 7 が示す通り実際はほぼ正しいスケール。グリコーゲンで膨れた明るい
+    hepatocyte が「粗い = 高倍率」と読まれる(fatty change の既知失敗と同型、
+    `lib/mpp_estimation.py` docstring 参照)。結果 best_rank 7 → 100+ に破壊。
+  - **推定が bimodal でガードバンドが不発**。7 カテゴリの全図版の推定は 0.35 / 0.5 /
+    2.0 / 2.83 ばかりで 1.0 付近(ガード帯 [0.625, 1.6])をまず出さない。だから
+    `fine_guard` と `fine_noguard` の結果が完全一致(ガードが一度も発火しない)。
+  - **細粒度化は逆効果**。synthetic の推定 median は良くなるが、atlas 図版では
+    0.5→0.35 / 2.0→2.83 とより極端な補正になり、旧 centroid より悪化。
+  - 「勝ち」の 2 つも脆い: Kupffer は GT 2 枚・1 化合物でバッチと分離不能、
+    Hypertrophy 30→23 は atlas GT の ±5 ノイズ + 単発の域。
+- **これで倍率スレッドは閉じる**。0022 = `fixed` は ±2x に頑健、0023 = それを超える
+  領域の自動推定は out-of-domain クエリでは信用できない。要補正なら既知係数で手動。
 
 ## 次の一手(成果物トラック)
 
