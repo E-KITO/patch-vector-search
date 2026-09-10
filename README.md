@@ -104,7 +104,9 @@ Ground truth比較(`scripts/validate_against_ground_truth.py`)のクエリ画像
   なお 2026-09-09 の 0018 昇格後、`outputs/gt_validation_results.csv` は
   `baseline_v1` = 0018 で再生成済み(job 10499)。0018 での 7 カテゴリは 0002 と
   ほぼ同じ(Kupffer best 76→78、Hypertrophy 23→24、他は不変〜±3。下記「背景パッチ」
-  の GT A/B と一致)。旧 0002 baseline_v1 の値は
+  の GT A/B と一致)。**2026-09-10 に対照図版除外(job 10511)を反映して再々生成**、
+  Hypertrophy は best 30 / found 24 に(理由は下の「2026-09-10 修正」バレット)。
+  旧 0002 baseline_v1 の値は
   `outputs/gt_validations/gt_validation_results_2026-09-09_deblank_ab_job10495.csv` に残る:
 
   | カテゴリ | baseline_v1 best (前→後) | v1_macenko best (前→後) |
@@ -121,6 +123,26 @@ Ground truth比較(`scripts/validate_against_ground_truth.py`)のクエリ画像
   README 各所の「Kupffer は最悪カテゴリ(best_rank 202)」という記述は誤格納由来を含んでおり、
   実際の値は 76(それでも良くはないが、ドメインギャップの状況証拠としての重みは下がる)。
   融合壊死は図版を10枚に戻しても改善せず(10 → 14)、「表現の限界」という結論は変わらない。
+
+- **【2026-09-10 修正】対照図版(`is_normal_control`)をクエリから除外した(job 10511)。**
+  誤格納修正とは別に、NNL の lesion ページには「Normal liver, age and sex matched, for
+  comparison with Figure N」という**正常肝の対照図版**が一部混ざっている(肝では Atrophy
+  2枚・Hepatocyte - Hypertrophy 2枚の計4枚のみ。他の所見にはない)。GT 7カテゴリでこれを
+  持つのは Hypertrophy だけ。全 lesion ページの caption を `data/query/nnl_liver_atlas_figures.csv`
+  に収集し、`lib/atlas_figures.py` の `query_images()` が `is_normal_control=yes` を落とす
+  ようにした(`validate_against_ground_truth.py` / `experiments/0020` が共有)。
+  除外後、**Hypertrophy は best_rank 24 → 30 と悪化し、found も 25 → 24**(GT 25 スライド
+  中1件が上位500から外れた)。正常肝タイルが「たまたま hypertrophy の GT スライドを含む
+  汎用肝細胞」を引いて順位を底上げしていたため。除外は正直な数字であって改善ではない。
+  他6カテゴリはフォルダ内容不変だが best_rank が 0〜5 ずれた(mitosis 7→10、髄外造血
+  25→28、封入体 480→475、Kupffer 76→78、融合壊死 14・Glycogen 7 は不変。下記の注記参照)。
+  `outputs/gt_validation_results.csv` は job 10511 の値で再生成済み。
+- **atlas GT 数値には ±5 位程度の非決定性ノイズがある**。`lib.query_embedding.embed_image_tiles`
+  の UNI 埋め込みは GPU の fp16/bf16 演算が run-to-run で完全一致せず、同じクエリ図版でも
+  再実行のたびに埋め込みが僅かに変わる。job 10511 では**フォルダ内容が全く変わっていない
+  6カテゴリの best_rank が 0〜5 位ずれた**。したがって atlas GT の best_rank/mean_rank は
+  「±5 位以内の差は誤差」として読むこと(self_retrieval 診断はコーパス側の固定埋め込みを
+  使うのでこの影響を受けない — 一次評価を self_retrieval に置く理由のひとつ)。
 
 - **アトラス画像1枚は所見部位を含む図版全体であり、所見が写っているのは画像の一部分に
   過ぎない**(矢印注釈・番号ラベル・周囲の正常組織や余白を含む、1800x1200px程度の
@@ -1263,11 +1285,19 @@ self_retrieval_diagnostic / 0015 の TG-GATEs アームは2軸で違っていた
   所見が多いのは、多くの所見で 0018 の上位が「所見と無関係な正常組織」で埋まるため —
   モデルの表現力ではなく **アトラス→TG-GATEs のドメインギャップ**が主因(0014 の #1 ブロッカー、
   0016 で補強)。
+- **対照図版の除外(job 10513、`--overwrite` 再実行)**: NNL の lesion ページには一部
+  「Normal liver ... for comparison with Figure N」の**対照図版**が混ざる(肝では Atrophy
+  2枚・Hepatocyte - Hypertrophy 2枚の計4枚のみ)。`lib.atlas_figures.query_images()` が
+  `data/query/nnl_liver_atlas_figures.csv` の `is_normal_control=yes` を見て除外する
+  ようにし、0020 のクエリセットも Atrophy 4→2枚・Hypertrophy 9→7枚に絞って作り直した。
+  除外対象外の23所見は sim レンジ・上位パッチとも前回(job 10504)と一致(スイープ経路は
+  実質再現的。`validate_against_ground_truth.py` 側は下記の通り数枚の順位揺れが出る)。
 - **運用メモ**: `USE_LOCAL_SSD_OUTPUT=0`(NFS 直書き)。=1 にすると「スイープをスキップして
   レポートだけ作り直す」再実行で `build_atlas_report.py` が空のスクラッチを見て所見出力を
   取りこぼす(job 10503 で発生、10504 で修正)。`experiment.py` は全所見完了済みなら索引
   ロードも省くので、レポートのみの再実行は1〜2分。25所見完了済みなら `PRE_NATIVE` の
-  72G ステージングもスキップする。
+  72G ステージングもスキップする。`run_slurm.sh` の `--overwrite` は反映後に外すこと
+  (job 10513 後に外した。figure フォルダやクエリパラメータを変えたときだけ一時的に足す)。
 
 ## experiments/0021: 多モデル埋め込み弁別力プローブ — 融合壊死・髄外造血(2026-09-10、job 10510)
 
