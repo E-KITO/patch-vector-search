@@ -239,7 +239,9 @@ def write_summary(project_root: Path, cfg: dict, run_dir: Path, logger: logging.
 
 
 def main() -> None:
-    argparse.ArgumentParser(description=__doc__).parse_args()
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--config", default="config.yml")  # load_config は常に exp_dir/config.yml
+    ap.parse_args()
     project_root = _get_project_root()
     sys.path.insert(0, str(project_root))
     cfg = load_config(Path(__file__).parent)
