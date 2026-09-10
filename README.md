@@ -55,11 +55,13 @@ UNIパッチ埋め込みに対するクラスタベースのベクトル検索
   否定的** — どのモデルも CI が重ならないレベルの改善を出せず、髄外造血は全モデル
   chance 以下。天井はエンコーダではなくコーパスカバレッジ/タスク定義の側(下記
   「experiments/0021」)。
-  **【2026-09-10 一部修正】** `experiments/0024` で類似度指標そのもの(L2 正規化コサイン)を
-  ZCA 白色化 / CSLS に替えると、self_retrieval の nhr best_rank median が 86 → 42、
-  **髄外造血 1000(未検出)→ 35、granular 160 → 11、単細胞壊死 124 → 52** と大幅改善。
+  **【2026-09-10 一部修正】** `experiments/0024`(部分サンプル proxy)→ `experiments/0025`
+  (ZCA 白色化をフル FAISS 索引にベイクして再測定)で、L2 正規化コサインを **whiten** に
+  替えると self_retrieval の `nhr_best_rank_med_noexp` が **granular 298→20・壊死 52→34・
+  肥大 59→38・髄外造血 125→91** 等、難所見 7 つで改善(2 つ悪化)。
   「融合壊死・髄外造血はエンコーダの弱点」の相当部分は**指標の hubness/異方性**だった。
-  コーパスカバレッジで詰んでいる所見(Kupffer 等)は指標では動かない。下記「experiments/0024」。
+  ただし whiten は atlas クエリ(ドメインギャップ)を悪化させるため既定索引への昇格は保留、
+  収縮白色化 or 成果物トラック専用索引を検討中。下記「experiments/0024」「0025」。
 - **区切りをつけた路線(いずれもbest_rankの低迷を解消しない)**: IVFクラスタリング仮説、
   手動ROIクロップ、染色正規化(クエリ側・コーパス側・per-tile交絡なしまで、4回検証)、
   **倍率自動補正(`experiments/0022`/`0023` で決着、下記)**。
@@ -1507,9 +1509,70 @@ atlas なし、正解 = 同一 FINDING_TYPE の別スライド)で、**FAISS を
 - **留保**: コーパス部分サンプル(100/slide)・nhr は proxy(top-hit_k)・所見あたり
   ~10 クエリスライドの median(Change eosinophilic は 175〜1000 で振れる)。本番
   パイプラインでの確認が必須。
-- **次**: `whiten`(または `abtt4`)を **索引再構築時のコーパス変換**として入れ
-  (`experiments/0025` 予定)、`self_retrieval_diagnostic`(フル FAISS)+ atlas GT で
-  再測定。granular を成果物パイプライン(0015/0019、「候補プール崩壊」で棚上げ)で再挑戦。
+- **次**: `whiten` / `abtt4` を索引再構築時のコーパス変換として入れてフル測定 → `experiments/0025`。
+
+## experiments/0025: 異方性除去変換を索引にベイクしてフル測定(2026-09-10、job 10546)
+
+`experiments/0024` の whiten / abtt4 を、コーパス部分サンプルの厳密行列ではなく
+**本番の OPQ+IVF+PQ 索引にベイク**(`lib.embedding_transform.make_faiss_pretransform` →
+`faiss.LinearTransform` + `NormalizationTransform` を index チェーンに prepend。
+`faiss.write_index`/`read_index` で変換ごと保存・復元され、**add/search 双方に自動適用**
+= `self_retrieval_diagnostic` も `validate_against_ground_truth` もコード変更ゼロ)して
+フル 18M パッチで再構築(`outputs/0017` の training_sample から fit、0018 と同一ハイパラ)。
+`scripts/validate_against_ground_truth.py` に `--index-dir` を追加。
+
+- **self_retrieval_diagnostic(フル FAISS、`nhr_best_rank_med_noexp` = バッチ交絡除外の主指標)**:
+
+  | finding | baseline(0018) | whiten | abtt4 |
+  |---|---|---|---|
+  | Degeneration, granular, eosinophilic | 298 | **20** | 54 |
+  | Hypertrophy | 59.5 | **38.5** | 50 |
+  | Necrosis | 52 | **34.5** | **31** |
+  | Increased mitosis | 59.5 | **39** | 48.5 |
+  | Deposit, glycogen | 21 | **11.5** | 13 |
+  | Ground glass appearance | 17 | **8.5** | 14 |
+  | Hematopoiesis, extramedullary | 125 | **91** | 98 |
+  | Change, eosinophilic | 146 | **239** ✗ | 267 ✗ |
+  | Cellular infiltration | 12 | **23** ✗ | 22 ✗ |
+  | Single cell necrosis | 44 | 45.5 | 63.5 ✗ |
+
+  **whiten: 7 所見改善 / 2 所見悪化 / 残り中立** —— 主指標では正味プラス。特に
+  granular(298→20)・壊死・肥大・glycogen・ground glass・髄外造血で大きい。
+  **abtt4 は 3 改善 / 3 悪化とほぼ相殺、whiten に劣る**(0024 の部分サンプルでは両者
+  近かったが、フル FAISS では差がついた)。
+- **atlas GT(7 カテゴリ、de-emphasize 済み・±5 ノイズ)は whiten で悪化**:
+
+  | category | baseline | whiten | abtt4 |
+  |---|---|---|---|
+  | Hypertrophy | 30 | 21 | 49 |
+  | Single cell necrosis | 14 | **45** ✗ | 52 ✗ |
+  | Hematopoiesis, extramedullary | 28 | **109** ✗✗ | 179 ✗✗ |
+  | Deposit, glycogen | 7 | **15** ✗ | 12 |
+  | Kupffer | 78 | 72 | 48 |
+
+  (ただし `found` はむしろ増える: whiten は全カテゴリで GT 全数を top-1000 内に retrieve、
+  baseline は Hypertrophy 24/25・mitosis 9/10。)
+- **機序**: 白色化は共分散を等方化する = 小さい固有値の方向を `1/√λ` 倍に増幅する。
+  コーパス内クエリでは埋もれた病理シグナルが浮上する(self_retrieval で改善)が、
+  **atlas 図版のように corpus-μ から遠い out-of-distribution クエリでは、その増幅が
+  ドメインギャップのノイズを増幅する**(atlas GT で悪化)。self_retrieval の
+  Change eos / Cellular infiltration の悪化も、白色化が効きすぎて元のジオメトリの
+  有用な部分まで崩している兆候。
+- **結論: 有望だが既定索引への昇格は保留**。whiten は主指標(コーパス内検索)で
+  難しい所見を大きく改善するが、(a) 動いていた common 所見 2 つを悪化、(b) atlas
+  クエリを悪化。次の選択肢:
+  - **収縮白色化**(identity と full-whiten を α で内挿: `(αΛ + (1−α)·meanλ·I + εI)^{-1/2}`、
+    α ∈ {0.3,0.5,0.7})で効きすぎを抑える → `experiments/0026`(0025 の infra 再利用、W だけ差し替え)
+  - **PCA 白色化 + 裾切り**(上位 k 次元だけ白色化)
+  - **whiten_v1 を成果物トラック専用の索引に**(0015/0019 の per-finding パッチ集は
+    コーパス内処理で atlas クエリ無し → whiten の恩恵だけ受けられる。特に granular を再挑戦)。
+    対話/atlas デモは 0018 のまま。
+- **昇格時の TODO**: `lib.search._exact_similarity`(パッチ再ランク、生 h5 を読む)にも
+  同じ変換を通すこと。0025 の測定は slide ランキング(`search_top_slides_multi`、h5 再ランク
+  なし)のみなので現状は未対応。
+- **既知の小欠陥**: `lib.faiss_index` は `logging.getLogger("lib.faiss_index")` に出力するが
+  実験側は `exp****` ロガーにしかハンドラを付けないので、索引構築の進捗ログ
+  (「added X/Y slides」等)が experiment.log に出ない(0018 でも同様)。
 
 ## 次の一手(成果物トラック)
 
