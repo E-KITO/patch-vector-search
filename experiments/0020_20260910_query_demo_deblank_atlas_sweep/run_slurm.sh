@@ -37,9 +37,10 @@ USE_LOCAL_SSD_OUTPUT=0
 
 PRE_NATIVE_COMMAND='
   set -euo pipefail
-  # 全 25 所見が完了済み（= report.html の作り直しだけ）なら 72G のステージングは不要。
+  # 全 25 所見が完了済みで、かつ --overwrite でない（= report.html の作り直しだけ）なら
+  # 72G のステージングは不要。--overwrite 時は全所見が再検索されるのでステージする。
   _NDONE=$(find "${PROJECT_ROOT}/outputs/${EXP_NAME}" -name completion.json -path "*/finding__*" 2>/dev/null | wc -l)
-  if [ "${_NDONE}" -ge 25 ]; then
+  if [ "${_NDONE}" -ge 25 ] && [[ "${RUN_COMMAND}" != *--overwrite* ]]; then
     echo "[stage] skip — ${_NDONE} findings already complete (report-only rebuild)"
   else
     _S="${SCRATCH_DIR}/staged"
@@ -69,7 +70,10 @@ _ATLAS_ROOT="${PROJECT_ROOT}/data/query/Nonneoplastic-Lesion-Atlas-National-Toxi
 # =====================================================
 
 RUN_MODE="single"
-RUN_COMMAND="python ${PYTHON_PATH} --config config.yml --atlas-root ${_ATLAS_ROOT} && python ${PROJECT_ROOT}/scripts/build_atlas_report.py --exp-name ${EXP_NAME}"
+# 2026-09-10: 対照図版除外 (lib.atlas_figures) を Atrophy/Hypertrophy に反映するため
+# 一時的に --overwrite。全 25 所見が再検索される（変わらない 23 所見はバイト同一）。
+# このリフレッシュ後に --overwrite を外すこと。
+RUN_COMMAND="python ${PYTHON_PATH} --config config.yml --atlas-root ${_ATLAS_ROOT} --overwrite && python ${PROJECT_ROOT}/scripts/build_atlas_report.py --exp-name ${EXP_NAME}"
 
 # =====================================================
 # Entry point
