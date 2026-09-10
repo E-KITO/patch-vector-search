@@ -57,6 +57,7 @@ import numpy as np
 import pandas as pd
 from PIL import Image
 
+from lib.atlas_figures import query_images
 from lib.query_embedding import embed_image_tiles
 from lib.search import PatchIndex
 
@@ -342,10 +343,17 @@ def run_comparison(
     t_all = time.time()
     for cat_dir_name, finding_type in CATEGORIES.items():
         cat_dir = ATLAS_DIR / cat_dir_name
-        images = sorted(cat_dir.glob("*.jpg")) + sorted(cat_dir.glob("*.png"))
+        # query_images() drops the atlas's own "Normal liver ... for comparison"
+        # control figures (is_normal_control=yes in nnl_liver_atlas_figures.csv).
+        # For the 7 GT categories this only affects Hypertrophy (2 of its 9
+        # atlas figures are normal-liver controls).
+        all_imgs = query_images(cat_dir, exclude_normal_control=False)
+        images = query_images(cat_dir)
         if not images:
             print(f"WARNING: no images found for {cat_dir_name!r}, skipping")
             continue
+        if len(images) != len(all_imgs):
+            print(f"  {cat_dir_name}: excluded {len(all_imgs) - len(images)} normal-control figure(s)")
         label = cat_dir_name.split(" - ")[0][:25]
         row = {"category": label}
 

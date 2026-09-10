@@ -26,6 +26,8 @@ features_dir: "data/trident_processed/20x_224px_0px_overlap/features_uni_v1"
 raw_slide_dir: "data/moo_collected_tggate_wsi/raw_wsi"
 # 所見フォルダの親（--atlas-root 未指定時のデフォルト）
 atlas_root: "data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver"
+# 図版メタデータ（lib.atlas_figures が対照図版 is_normal_control=yes を除外するのに使う）
+atlas_figures_csv: "data/query/nnl_liver_atlas_figures.csv"
 
 # --- クエリタイリング ---
 tile_size: 224

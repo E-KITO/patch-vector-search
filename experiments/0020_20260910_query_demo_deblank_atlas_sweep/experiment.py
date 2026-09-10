@@ -102,13 +102,20 @@ def _completed(*dirs: Path) -> bool:
     return False
 
 
-def resolve_findings(atlas_root: Path) -> list[tuple[str, str, list[str]]]:
-    """-> [(finding_name, slug, [image_path, ...]), ...]（画像のあるフォルダのみ）。"""
+def resolve_findings(atlas_root: Path, atlas_csv: Path) -> list[tuple[str, str, list[str]]]:
+    """-> [(finding_name, slug, [image_path, ...]), ...]（画像のあるフォルダのみ）。
+
+    `lib.atlas_figures.query_images` が「Normal liver ... for comparison」対照図版
+    （`is_normal_control=yes`）を除外する。肝 NNL では Atrophy と Hepatocyte -
+    Hypertrophy の計 4 枚のみが該当。
+    """
+    from lib.atlas_figures import query_images
+
     if not atlas_root.is_dir():
         raise SystemExit(f"atlas root {atlas_root} is not a directory")
     out = []
     for sub in sorted(p for p in atlas_root.iterdir() if p.is_dir()):
-        imgs = sorted(str(p) for p in sub.iterdir() if p.suffix.lower() in _IMG_EXTS)
+        imgs = [str(p) for p in query_images(sub, atlas_csv=atlas_csv)]
         if imgs:
             out.append((sub.name, _slug(sub.name)[:120], imgs))
     if not out:
@@ -272,13 +279,14 @@ def main() -> None:
     index_predeblank_dir = _staged_or(project_root, config["index_predeblank_dir"], "PVS_INDEX_PREDEBLANK_DIR")
     raw_slide_dir = project_root / config["raw_slide_dir"]
     atlas_root = Path(args.atlas_root) if args.atlas_root else project_root / config["atlas_root"]
+    atlas_csv = project_root / config["atlas_figures_csv"]
 
     print(f"features_dir:          {features_dir}")
     print(f"index_deblank_dir:     {index_deblank_dir}")
     print(f"index_predeblank_dir:  {index_predeblank_dir}")
     print(f"atlas_root:            {atlas_root}")
 
-    findings = resolve_findings(atlas_root)
+    findings = resolve_findings(atlas_root, atlas_csv)
     print(f"findings: {len(findings)} -> {[s for _, s, _ in findings]}")
 
     # 全所見が完了済みなら索引ロードを省く（run_slurm.sh が続けて呼ぶ
