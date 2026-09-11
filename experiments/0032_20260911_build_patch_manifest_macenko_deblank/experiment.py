@@ -66,6 +66,52 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _adjust_blankness_for_corpus(
+    blankness_path: Path, features_dir: Path, out_path: Path, logger: logging.Logger,
+) -> Path:
+    """corpus_blankness.parquet は plain uni_v1 コーパスの h5 から計測したもの
+    (slide_id, local_idx, sat_frac)。Macenko コーパスは独立した wsi_preprocess
+    抽出なので、タイリング境界の非決定性で一部スライドのパッチ数がわずかに
+    (1000スライド中25枚、差は1〜5パッチ)ずれている — この状態で
+    lib.manifest.build_patch_manifest にそのまま渡すと、ローカルインデックス
+    範囲外の除外行を検出して fail-fast する(意図通りの安全装置、job 10601)。
+
+    パッチ数が一致しないスライドは local_idx の対応が保証できない(1件ズレる
+    だけで以降の全パッチの対応がズレうる)ため、除外リストを補正して当てはめる
+    のではなく、**そのスライドだけ背景除外をスキップする**(全パッチ保持)。
+    影響は25/1000スライドに数%の背景パッチが残る程度で、誤った対応付けで
+    無関係なパッチを消すよりはるかに安全。
+    """
+    import h5py
+    import pandas as pd
+
+    df = pd.read_parquet(blankness_path)
+    n_before = len(df)
+    mismatched = []
+    for slide_id, group in df.groupby("slide_id"):
+        h5_path = features_dir / f"{slide_id}.h5"
+        if not h5_path.exists():
+            mismatched.append(str(slide_id))
+            continue
+        with h5py.File(h5_path, "r") as f:
+            n_patches = f["coords"].shape[0]
+        if int(group["local_idx"].max()) >= n_patches:
+            mismatched.append(str(slide_id))
+
+    if mismatched:
+        logger.warning(
+            "%d/%d slides have a patch-count mismatch vs %s — skipping background "
+            "exclusion for these slides only (kept unfiltered): %s",
+            len(mismatched), df["slide_id"].nunique(), blankness_path, mismatched,
+        )
+        df = df[~df["slide_id"].astype(str).isin(mismatched)]
+    logger.info("blankness rows: %d -> %d after mismatch adjustment", n_before, len(df))
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(out_path)
+    return out_path
+
+
 def main() -> None:
     project_root = _get_project_root()
     sys.path.insert(0, str(project_root))
@@ -89,7 +135,10 @@ def main() -> None:
 
     background_blankness_path = config.get("background_blankness_path")
     if background_blankness_path:
-        background_blankness_path = project_root / background_blankness_path
+        background_blankness_path = _adjust_blankness_for_corpus(
+            project_root / background_blankness_path, features_dir,
+            run_dir / "corpus_blankness_adjusted.parquet", logger,
+        )
     background_sat_frac_max: float = config.get("background_sat_frac_max", 0.10)
 
     write_run_metadata(run_dir, exp_name=exp_name, variant_key=variant_key)
