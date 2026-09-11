@@ -1606,18 +1606,52 @@ best_rank を比較(索引再構築なし、既存索引をそのまま使用)�
   | Inclusion body, intracytoplasmic | 2 | 0/2 | 両方とも大きく改善(-127, -156) |
   | Deposit, glycogen | 4 | 2/4 | ほぼ拮抗(1図版は baseline 未検出GTを新規発見) |
 
-  atlas GT 悪化の主犯として 0025 で名指しされた2カテゴリ(Necrosis,
+  atlas GT 悪化の主犯として 0025 で名指しされた2カテゴリ(Single cell necrosis,
   Hematopoiesis extramedullary)は、そのカテゴリの図版のほぼ全部/全部が同じ方向に
   悪化しており、1〜2枚の外れ値図版が平均を引きずり下げているのではない。逆に
   Hypertrophy / Inclusion body は図版レベルでもほぼ一貫して改善している。
 - **解釈**: 外れ値仮説は棄却され、構造的なドメインギャップ仮説を支持する結果。
   ただし「atlas クエリ全般 vs コーパス」という一枚岩のギャップではなく、**所見
-  ごとに白色化との相性が系統的に違う**——Necrosis / Hematopoiesis extramedullary
-  の atlas 図版群は、白色化が増幅する小固有値方向とズレの方向が重なって悪化する
-  一方、Hypertrophy / Inclusion body は逆に恩恵を受けている、という構図。
-- **次**: Necrosis/Hematopoiesis(悪化側)と Hypertrophy/Inclusion body(改善側)の
-  間で何が違うのかを見て、所見ごとに変換を出し分ける(または悪化する所見だけ変換を
-  無効化する)方向が有望。
+  ごとに白色化との相性が系統的に違う**——Single cell necrosis / Hematopoiesis
+  extramedullary の atlas 図版群は、白色化が増幅する小固有値方向とズレの方向が
+  重なって悪化する一方、Hypertrophy / Inclusion body は逆に恩恵を受けている、
+  という構図。
+
+### 追加検証: 単純表記「Necrosis」(n=13)で評価すると結論が逆転する(job 10589)
+
+`Liver - Necrosis` atlas フォルダは `CATEGORIES` で `Single cell necrosis`
+(コーパス内 GT わずか4枚)にしかマッピングされていなかった。同じ atlas 図版群を
+コーパス内によりGTが多い(13枚)単純表記の `Necrosis` ラベルで評価し直したところ
+(`EXTRA_CATEGORIES`、新規 atlas 図版は不要)、**同じ図版なのに結論が逆転した**:
+
+| finding | 図版数 | 悪化した図版 | 悪化幅の合計 |
+|---|---|---|---|
+| Single cell necrosis(n=4) | 10 | 9/10 | 悪化が支配的 |
+| Necrosis(n=13) | 10 | 4/10 | **-282(改善が支配的、6枚が-68〜-124の大幅改善)** |
+
+`Single cell necrosis` の悪化は GT4枚という小標本の偏りだった可能性が高く、より
+多くのGTを持つ `Necrosis` ラベルで見ると白色化はこの atlas 図版群にむしろ有効、
+という評価に変わる。**同じ atlas フォルダでも、クエリに付与する所見ラベルが違えば
+ルーティングの結論も変わる** —— 索引の出し分けは atlas フォルダ単位ではなく
+finding_type 単位で行うべきという設計上の含意。
+
+### 所見ごとのルーティング表(GT実測ベース、確定)
+
+| finding | 根拠 | ルーティング |
+|---|---|---|
+| Hypertrophy | 7枚中5枚改善(net改善) | **whiten** |
+| Necrosis | 10枚中6枚改善、net -282 | **whiten** |
+| Deposit, glycogen | 拮抗+新規GT発見1件 | **whiten** |
+| Proliferation, Kupffer cell | 改善(-6) | **whiten** |
+| Inclusion body, intracytoplasmic | 2枚とも大幅改善 | **whiten** |
+| Single cell necrosis | 10枚中9枚悪化 | **baseline** |
+| Hematopoiesis, extramedullary | 4枚とも悪化 | **baseline** |
+| Increased mitosis | 唯一の図版(n=1)が悪化 | **baseline**(サンプル数少なくatlas実測を優先) |
+| 上記以外(atlas GT未検証、約9所見) | 実測なし | **baseline**(保守方針。悪化しないと確認できるまでは whiten を使わない) |
+
+未検証の所見のうち、ドメイン的に atlas カテゴリと対応しうる候補(Cellular
+infiltration↔Inflammation, Vacuolization cytoplasmic↔Fatty Change)はあるが、
+ラベルの医学的妥当性が未確認のため今回は保留。
 
 ## 次の一手(成果物トラック)
 
