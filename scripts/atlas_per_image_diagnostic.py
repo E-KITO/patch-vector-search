@@ -30,6 +30,16 @@ from scripts.validate_against_ground_truth import ATLAS_DIR, CATEGORIES, GT_CSV,
 
 FEATURES_DIR = Path("data/trident_processed/20x_224px_0px_overlap/features_uni_v1")
 
+# CATEGORIES は 1 atlas フォルダにつき finding_type 1つだが、同じ図版を別の
+# finding_type の GT で評価したいケース(例: "Liver - Necrosis" フォルダは
+# CATEGORIES で "Single cell necrosis"(コーパス内 n=4)にしかマッピングされて
+# いないが、同じフォルダの図版で単純表記の "Necrosis"(n=13、より多くの GT を
+# 持つ)も評価できる)のための追加エントリ。新しい atlas 図版は不要 — 既存の
+# フォルダをそのまま別の finding_type の物差しで測るだけ。
+EXTRA_CATEGORIES: list[tuple[str, str]] = [
+    ("Liver - Necrosis - Nonneoplastic Lesion Atlas", "Necrosis"),
+]
+
 
 def load_index(exp_dir: str | Path) -> PatchIndex:
     exp_dir = Path(exp_dir)
@@ -62,7 +72,7 @@ def run(index_dirs: dict[str, Path], nprobe: int = 64) -> pd.DataFrame:
     gt["slide_id"] = gt["image_id"].str.replace(".svs", "", regex=False)
 
     rows = []
-    for cat_dir_name, finding_type in CATEGORIES.items():
+    for cat_dir_name, finding_type in list(CATEGORIES.items()) + EXTRA_CATEGORIES:
         cat_dir = ATLAS_DIR / cat_dir_name
         images = query_images(cat_dir)
         if not images:
