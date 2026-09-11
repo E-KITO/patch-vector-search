@@ -1,0 +1,67 @@
+# ============================================================
+# experiments/0022: 合成再スケール検索評価
+# ============================================================
+# 「クエリ画像の見かけ倍率がコーパス(20x)からずれると検索がどれだけ劣化するか」を、
+# コーパス自身から作った合成クエリ(正解スライド既知)で定量する。test-time スケール
+# 探索(option C)に本当にターゲットがあるかを判定するための前段。
+#
+# 方法: 0018 索引のコーパススライドを random 抽出し、各スライドの実パッチ座標に
+# アンカーした grid_tiles×grid_tiles ブロックを、raw WSI から
+# 「倍率比 r で撮影された」ように読み出す(level-0 で round(grid*P/r) px の窓を読み、
+# grid*224 px にリサンプル)。P = スライドごとの patch_size_level0。
+#
+# アーム(同じ合成クエリ画像に対して):
+#   fixed    : そのまま embed_image_tiles → 検索(= 現行パイプラインが倍率 r の
+#              クエリに対して行う挙動)
+#   oracle   : r が既知として画像を 1/r 倍リサイズしてからタイル化 → 検索
+#              (完全なスケール補正 = 上限。劣化が「スケール」由来か
+#               「リサンプル/情報欠落」由来かを切り分ける)
+#   autoscale: embed_image_tiles_auto_scale(FM centroid 投票) → 検索。
+#              推定スケール scale_est vs 真値 1/r で推定器の精度も記録
+#              (棚上げ済みの点推定補正を、正解既知のクリーンな指標で再評価)
+#
+# 指標(アーム × r): 正解スライドの n_hits_ratio ランキング順位の median / found@k。
+#
+# 読み方:
+#   - fixed が r=1 で順位 ~1 (near-exact tile マッチ) → サニティ OK
+#   - fixed が r=2 でも順位 <=5 → UNI はスケール頑健 → C は不要、倍率問題クローズ
+#   - fixed が r=2 で順位 >=50 かつ oracle が <=5 → スケール不整合は実在かつ補正可能
+#     → C にターゲットあり。autoscale の scale_est 精度が点推定で足りるか探索が要るかを示す
+#   - fixed も oracle も劣化 → リサンプル/FOV 欠落であってスケールでは直らない → C 不発
+# ============================================================
+
+seed: 42
+
+# --- コーパス索引(0018 = 背景除去済み・現行既定) ---
+# search_top_slides_multi は FAISS 索引 + manifest + slide_meta しか読まない
+# (h5 の exact re-rank はしない)ので、72G features のステージングは不要。
+index_dir: "outputs/0018_20260909_build_faiss_index_deblank/default"
+# PatchIndex.load のシグネチャ用(この評価では h5 は読まれない)。
+features_dir: "data/trident_processed/20x_224px_0px_overlap/features_uni_v1"
+# 合成クエリの読み出し元(全 1000 スライドをカバー)。
+raw_slide_dir: "data/moo_collected_tggate_wsi/raw_wsi"
+# autoscale アームの FM スケール centroid(lib.mpp_estimation、2026-08-22 生成)。
+scale_centroids: "data/scale_centroids.npz"
+
+# --- 合成クエリのサンプリング ---
+# random 抽出するコーパススライド数と、スライドあたりのアンカー領域数。
+# 低 r (縮小クエリ) の oracle/autoscale は補正で画像を拡大するためタイル数が
+# (4/r)^2 まで増える。40x3 で低 r の検索コストを ~4h に収める。
+n_slides: 40
+regions_per_slide: 3
+# クエリ画像のタイルグリッド(grid_tiles×grid_tiles)。r=1 では
+# grid_tiles^2 個の corpus パッチ相当の組織を一括で検索へ投入。
+grid_tiles: 4
+# 倍率比 r = (クエリの見かけ倍率) / (コーパス 20x)。r>1 = より拡大、r<1 = より縮小。
+# r=1.0 はサニティアンカー(near-exact tile マッチで順位 ~1 になるべき)。
+ratios: [0.35, 0.5, 0.71, 1.0, 1.41, 2.0, 2.83]
+# 実行アーム。
+arms: ["fixed", "oracle", "autoscale"]
+# autoscale の scale 推定にかける上限。既定の 2.0 は「過大推定は 4x/8x に出る」
+# という運用上の cap だが、ここでは推定器の素の挙動を見たいので広めに取る
+# (r=0.35 の完全補正 1/r ≈ 2.86 を clip しない)。
+auto_scale_max: 3.0
+
+# --- 検索パラメータ(scripts/self_retrieval_diagnostic.py に合わせる) ---
+k_candidates: 8000
+nprobe: 64

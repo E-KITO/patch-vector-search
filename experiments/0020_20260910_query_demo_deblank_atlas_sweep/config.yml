@@ -1,0 +1,62 @@
+# ============================================================
+# experiments/0020: NNL アトラス全所見スイープ（背景除去 0018 vs 0002）
+# ============================================================
+# 初代のアトラス検索 Artifact（所見ごとに「クエリタイル行 + 検索結果パッチ行」）を、
+# 現行の改善後経路で作り直すためのデータ生成:
+#   - クエリ側: uni_v1 plain タイリング（染色正規化なし = 現行既定。Macenko は
+#     4回検証して棚上げ、experiments/0013 参照）+ 彩度ベース空白タイル除外
+#   - コーパス側: 0018（sat_frac<0.10 の背景 389,959 枚を除いた既定索引）と
+#     0002（背景除去前）の2本を同一クエリで検索し、所見ごとに before/after を並べる
+#
+# experiments/0013 の per-finding atlas sweep（--atlas-root）と同じ集約単位
+# （所見フォルダ = 1クエリ、フォルダ内の全図版を統合）。図版は matplotlib では
+# なく個別 JPEG で書き出す（Artifact 埋め込み用）。
+# ============================================================
+
+seed: 42
+
+# --- コーパス索引（2本） ---
+# 背景除去済み・現行既定（experiments/0018）
+index_deblank_dir: "outputs/0018_20260909_build_faiss_index_deblank/default"
+# 背景除去前・参照（experiments/0002）
+index_predeblank_dir: "outputs/0002_20260808_build_faiss_index/default"
+# 両索引が共有する uni_v1 パッチ特徴量（exact re-rank の h5 読み出し元）
+features_dir: "data/trident_processed/20x_224px_0px_overlap/features_uni_v1"
+# lib.raw_patch.crop_patch のソース（生 WSI、全 1000 スライドをカバー）
+raw_slide_dir: "data/moo_collected_tggate_wsi/raw_wsi"
+# 所見フォルダの親（--atlas-root 未指定時のデフォルト）
+atlas_root: "data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver"
+# 図版メタデータ（lib.atlas_figures が対照図版 is_normal_control=yes を除外するのに使う）
+atlas_figures_csv: "data/query/nnl_liver_atlas_figures.csv"
+
+# --- クエリタイリング ---
+tile_size: 224
+
+# --- 検索パラメータ（notebooks/01_query_demo.ipynb の推奨パイプラインに合わせる） ---
+# 現行既定の対話フロー(0018 昇格後)は
+#   search_similar_patches_multi(query_vecs, k=20, nprobe=32, rerank_pool=200, max_tiles_reranked=12)
+# なので、それに揃える。k だけは「所見ごとに表示するパッチ数」なので 10 に絞る。
+k: 10
+nprobe: 32
+# search_similar_patches が FAISS から取る近傍数(実効的な探索深度)。
+rerank_pool: 200
+# 近似スコア上位いくつのクエリタイルを exact re-rank するか。notebook 既定と同じ 12。
+# （null = 全タイル re-rank は experiments/0009/0013 の実験設定で、README 上
+#  「GT 未検証」。局所所見のタイル選択バイアスには効くが、ここでは現行の
+#  推奨パイプラインが何を引くかを示すのが目的なので 12 に合わせる。）
+max_tiles_reranked: 12
+
+# --- 図版出力 ---
+# 所見ごとに保存するクエリタイルのサムネイル上限（元 Artifact は横スクロールで
+# 全タイル、ここでは代表を上限内で保存。n_tiles は実数を JSON に記録）。
+n_query_tiles_shown: 24
+# 書き出す JPEG の一辺（px）。
+thumb_px: 224
+
+# --- report.html 生成（build_report.py。experiment.py からは参照しない） ---
+# 埋め込みサムネイルの一辺（px）と JPEG 品質。16MB 上限に収めるための調整用。
+report_thumb_px: 150
+report_jpeg_q: 80
+# 所見あたり HTML に載せるクエリタイル数と、成果物ギャラリーのパッチ数。
+report_query_tiles: 12
+report_deliver_patches: 40

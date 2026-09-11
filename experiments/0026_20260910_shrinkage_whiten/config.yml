@@ -1,0 +1,40 @@
+# ============================================================
+# experiments/0026: 収縮白色化(shrinkage whitening)の α スイープ
+# ============================================================
+# experiments/0025 で full ZCA 白色化(α=1)は self_retrieval のコーパス内検索を
+# 難所見で大きく改善する一方、(a) 動いていた common 所見 2 つ(Change eosinophilic /
+# Cellular infiltration)を悪化させ、(b) atlas クエリを悪化させた。機序は
+# 「小固有値方向を 1/√λ 倍に増幅 → コーパス内シグナルは浮上するが out-of-domain の
+# ドメインギャップノイズも増幅」。
+#
+# ここでは固有値を平均へ収縮してから逆平方根を取る:
+#   λ_i^shrunk = α·λ_i + (1−α)·mean(λ)
+#   A = V diag(1/√(λ_i^shrunk + ε)) V^T
+# α=0 は baseline(0018)と等価、α=1 は 0025 の whiten。中間 α で増幅を抑える。
+#
+# 構築・測定するのは α ∈ {0.25, 0.5, 0.75} の 3 本のみ。両端(baseline / full whiten)は
+# 0025 の出力 CSV を summary で参照する。各ステージは出力の存在で冪等。
+# ============================================================
+
+seed: 42
+
+features_dir: "data/trident_processed/20x_224px_0px_overlap/features_uni_v1"
+manifest_exp_dir: "outputs/0017_20260909_build_patch_manifest_deblank/default"
+baseline_index_dir: "outputs/0018_20260909_build_faiss_index_deblank/default"
+# 0025 の run_dir(baseline / full whiten の self_retrieval・atlas GT CSV がある)。
+prior_run_dir: "outputs/0025_20260910_whiten_index_rebuild/default"
+
+# FAISS ハイパラ(0018/0025 と完全一致)。
+nlist: 4096
+pq_m: 64
+pq_nbits: 8
+opq_niter: 10
+
+# 変換の当てはめ。
+fit_sample: 200000
+whiten_eps: 0.001
+
+# 収縮係数。α=0→baseline 相当、α=1→0025 whiten。
+alphas: [0.25, 0.5, 0.75]
+
+nprobe: 64

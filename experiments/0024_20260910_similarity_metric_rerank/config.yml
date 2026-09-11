@@ -1,0 +1,65 @@
+# ============================================================
+# experiments/0024: 類似度指標の再ランク比較(self-retrieval、FAISS なし)
+# ============================================================
+# 引き継ぎ資料の「類似度の算出方法はほかにあるのか」への回答。現行は
+# 「L2 正規化 UNI 埋め込みのコサイン類似度」だが、これには2つの既知の弱点がある:
+#
+#   1. 異方性 (anisotropy): UNI 埋め込みは球面上に一様分布せず、平均ベクトル μ が
+#      大きなノルムを持ち、少数の主方向が分散の大半を占める。これらの主方向は
+#      しばしば染色・スキャナ・バッチといった nuisance を表す(0007-0009 の
+#      「which lab scanned this が支配する」)。結果、任意の2パッチのコサインが
+#      軒並み 0.4-0.6 になり(atlas クエリの「0.5..0.69」の一部はこれ)、
+#      病理シグナルが埋もれる。
+#   2. hubness: 高次元 + 異方性の帰結。一部のコーパスパッチ(hub = 分布中心に近い
+#      「ありふれた正常肝細胞」)が多数のクエリの kNN に現れ、所見パッチの枠を奪う
+#      (0007-0009 で文書化済みの失敗モード)。
+#
+# 対策を self_retrieval_diagnostic と同じ土俵(コーパス内 leave-one-out、
+# atlas なし、正解 = 同一 FINDING_TYPE の別スライド)で A/B する。FAISS の
+# 近似は使わず、コーパスをスライドごとに部分サンプルした厳密行列で全アームを回す
+# (IVF の粗さは experiments/0019 相当で否定済みなので、ここでは指標そのものを見る)。
+#
+# アーム(各々 単位ベクトルへの線形変換 T を定義 → 変換空間でコサイン、必要なら CSLS 補正):
+#   cosine      : 恒等(baseline。現行パイプラインの厳密コサイン版)
+#   center      : コーパス平均 μ を引いて再正規化
+#   abtt{1,2,4} : 上位 d 主成分を除去 (Mu & Viswanath 2018, all-but-the-top)、再正規化
+#   whiten      : ZCA 白色化 W = (Σ + εI)^{-1/2}(全方向を等分散に)
+#   csls        : コサイン + CSLS 補正 (Conneau et al. 2018)。
+#                 csls(q,c) = 2·cos(q,c) − r_T(c) − r_S(q)
+#                 r_T(c) = c のコーパス内 kNN との平均コサイン(hub にペナルティ)
+#                 r_S(q) = q のコーパス内 kNN との平均コサイン
+#   csls_abtt2  : abtt2 空間で CSLS(両者の併用)
+# ============================================================
+
+seed: 42
+
+index_dir: "outputs/0018_20260909_build_faiss_index_deblank/default"
+features_dir: "data/trident_processed/20x_224px_0px_overlap/features_uni_v1"
+gt_csv: "data/processed_csv/single_finding_liver.csv"
+
+# --- コーパス部分サンプル(厳密行列) ---
+# スライドあたり何パッチ(背景除外後の manifest から)を厳密行列に入れるか。
+# n_hits_ratio proxy の分母をスライド間で揃えるため per-slide 固定。
+# CSLS の r_T は O(Nsub^2) なので 100 で ~2h に収める。
+n_corpus_subsample: 100
+# PCA / 共分散の当てはめに使うさらなる部分サンプル(全 ~100k から)。
+pca_fit_sample: 40000
+
+# --- クエリ(self_retrieval_diagnostic と同じ層化) ---
+min_slides_per_finding: 2
+max_query_slides_per_finding: 10
+n_query_vecs: 400
+
+# --- 変換パラメータ ---
+abtt_dims: [1, 2, 4]
+whiten_eps: 0.001
+# CSLS の近傍数。
+csls_k: 10
+
+# --- スコアリング ---
+# n_hits_ratio proxy: 各クエリベクトルの上位 hit_k コーパスパッチを「hit」とみなす。
+hit_k: 10
+
+arms: ["cosine", "center", "abtt1", "abtt2", "abtt4", "whiten", "csls", "csls_abtt2", "csls_whiten"]
+# csls_whiten: whiten 空間で CSLS。job 10525 で CSLS が sim を、whiten が nhr を
+# 別々に叩くと判明したので、両方の併用を検証する。

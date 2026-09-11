@@ -1,0 +1,63 @@
+# ============================================================
+# experiments/0023: autoscale 復活 — centroid 細粒度化 + ガードバンド + atlas GT 再測定
+# ============================================================
+# experiments/0022 の合成再スケール評価で分かったこと:
+#   - UNI は ±2x の倍率ずれには頑健(fixed パイプラインが median 順位 1〜2)
+#   - >2x で崩れるがそれはスケール由来で、点推定補正
+#     (embed_image_tiles_auto_scale)が oracle とほぼ同等に回復する
+#   - 棚上げ時の「atlas GT 7/7 で悪化」は真倍率不明・コンテンツ混在の atlas 図版で
+#     測ったもの。centroid グリッド {0.5,1,2,4,8} は粗く r=0.71/1.41 が最近傍に
+#     スナップする
+#
+# この実験の 3 ステップ(1 回の GPU ジョブ):
+#   (a) centroid_scales で scale centroid を作り直す(細かいグリッド)。
+#       → run_dir/scale_centroids_fine.npz
+#   (a-validate) 合成再スケールクエリ(小サンプル・検索なし・投票のみ)で、
+#       旧 centroid vs 新 centroid の scale 推定誤差 |log(scale_est / (1/r))| を比較。
+#       新グリッドが中間倍率の推定を実際に改善したかを確認。
+#   (b)+(c) atlas GT 7 カテゴリを 0018 索引で再測定。アーム:
+#       baseline               : 補正なし(現行パイプライン)
+#       autoscale_orig         : 旧 centroid・ガードなし・max_scale=2.0
+#                                (棚上げ時の設定の忠実な再現)
+#       autoscale_fine_guard   : 新 centroid + ガードバンド + max_scale=auto_scale_max
+#       autoscale_fine_noguard : 新 centroid・ガードなし(ガードの寄与を切り分け)
+#       ガードバンド: 推定 scale が 1/guard_band 〜 guard_band の範囲なら補正しない
+#       (r≈1 では補正は害にしかならないため)
+# ============================================================
+
+seed: 42
+
+# --- コーパス索引(0018 = 背景除去済み・現行既定) ---
+index_dir: "outputs/0018_20260909_build_faiss_index_deblank/default"
+features_dir: "data/trident_processed/20x_224px_0px_overlap/features_uni_v1"
+raw_slide_dir: "data/moo_collected_tggate_wsi/raw_wsi"
+# 棚上げ時の centroid(lib.mpp_estimation、2026-08-22、scales {0.5,1,2,4,8})。
+orig_centroids: "data/scale_centroids.npz"
+# atlas GT: lesion フォルダの親と GT ラベル CSV。
+atlas_dir: "data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver"
+gt_csv: "data/processed_csv/single_finding_liver.csv"
+
+# --- (a) centroid 再ビルド ---
+# 0022 の倍率比グリッドに合わせる。centroid の scale k は「1/k 倍率で撮影した
+# ように見える」の k。build_scale_reference_centroids が 224*k px 窓を 224 に
+# リサンプルして合成する。
+centroid_scales: [0.35, 0.5, 0.71, 1.0, 1.41, 2.0, 2.83]
+centroid_n_slides: 20
+centroid_samples_per_slide: 4
+
+# --- (b) ガードバンド ---
+# 推定 scale が [1/1.6, 1.6] に入るなら補正しない(0022: fixed は r∈[0.5,2.0] で
+# 十分。この帯で誤った小補正をかけるのを防ぐ)。
+guard_band: 1.6
+# 補正の上限。0022 で centroid は ~2.86 まで届くべきと判明したので広めに。
+auto_scale_max: 3.0
+
+# --- (a-validate) 合成再スケール推定チェック(検索なし・投票のみ) ---
+est_n_slides: 15
+est_regions_per_slide: 2
+est_grid_tiles: 4
+est_ratios: [0.35, 0.5, 0.71, 1.0, 1.41, 2.0, 2.83]
+
+# --- 検索パラメータ(validate_against_ground_truth.py / self_retrieval に合わせる) ---
+k_candidates: 8000
+nprobe: 64

@@ -5,11 +5,18 @@ UNIパッチ埋め込みに対するクラスタベースのベクトル検索
 類似する組織パッチと、それを多く含むWSIを検索できる。  
 **最終的な目標は、INHANDやNTPの非腫瘍性病変アトラスのような、所見の代表的なパッチを検索クエリとして使い、TGGATEの大規模なWSIコーパスから同じ所見を引き出してデータベース化すること。**
 
-## 現状(2026-09-09時点)
+## 現状(2026-09-10時点)
 
 - **動くもの**: 任意の画像(1枚〜複数枚)を渡すと、類似パッチ検索とWSI逆引きができる。
   実解像度でのヒットパッチ表示・クエリタイルごとの近似スコアヒートマップ表示も追加済み
   (下記「検索結果の可視化改善とタイル選択バイアスの発見」参照)。
+- **検索結果 Artifact(2026-09-10、`experiments/0020`)**: 初代の「NNL アトラス所見図版 →
+  類似パッチ検索」デモ Artifact を、現行の改善後経路(背景除去 0018 + notebook 01 の探索
+  パラメータ)で作り直した。25所見を `0018` / `0002` の両索引で検索した before/after +
+  成果物ギャラリー + 自己検索診断の総合レポート:
+  https://claude.ai/code/artifact/a34cf5e1-b488-4571-8027-065c20098df3 。
+  発見: 背景除去は max_similarity 上位パッチをほとんど動かさない(効果はスライド単位
+  ランキング側)。下記「experiments/0020」参照。
 - **成果物パイプライン**: `lib/patch_set.py` + `experiments/0015` で、所見の確定スライドを
   seed に**レビュー可能な代表パッチ集**(実解像度パッチ + manifest + スライド別コンタクト
   シート)を出力できる。`Deposit, glycogen` では GT スライドを全除外した deliver モードで
@@ -43,10 +50,35 @@ UNIパッチ埋め込みに対するクラスタベースのベクトル検索
   eosinophilic・Single cell necrosis の好成績はバッチ由来と判明。**融合壊死(`Necrosis`)
   と髄外造血はこの拡張後も本物の弱点**。中核仮説(代表パッチ→類似パッチ検索)は
   「機能する所見」については成立しており、成果物トラックの glycogen・ground glass も
-  ここに含まれる。
+  ここに含まれる。**この2所見について他エンコーダ(uni_v2 / virchow2 / hibou_l)が
+  uni_v1 を上回るかを `experiments/0021` の弁別力プローブ(2026-09-10)で確認したが
+  否定的** — どのモデルも CI が重ならないレベルの改善を出せず、髄外造血は全モデル
+  chance 以下。天井はエンコーダではなくコーパスカバレッジ/タスク定義の側(下記
+  「experiments/0021」)。
+  **【2026-09-10 一部修正】** `experiments/0024`(部分サンプル proxy)→ `experiments/0025`
+  (ZCA 白色化をフル FAISS 索引にベイクして再測定)で、L2 正規化コサインを **whiten** に
+  替えると self_retrieval の `nhr_best_rank_med_noexp` が **granular 298→20・壊死 52→34・
+  肥大 59→38・髄外造血 125→91** 等、難所見 7 つで改善(2 つ悪化)。
+  「融合壊死・髄外造血はエンコーダの弱点」の相当部分は**指標の hubness/異方性**だった。
+  ただし whiten は atlas クエリ(ドメインギャップ)を悪化させるため既定索引への昇格は保留、
+  収縮白色化 or 成果物トラック専用索引を検討中。下記「experiments/0024」「0025」。
 - **区切りをつけた路線(いずれもbest_rankの低迷を解消しない)**: IVFクラスタリング仮説、
   手動ROIクロップ、染色正規化(クエリ側・コーパス側・per-tile交絡なしまで、4回検証)、
-  倍率自動補正。
+  **倍率自動補正(`experiments/0022`/`0023` で決着、下記)**。
+- **倍率(magnification)— 決着**:
+  - `experiments/0022`(job 10516): 正解既知の合成再スケールクエリで、**`fixed`
+    パイプラインは ±2x の倍率ずれに頑健**(median 順位 1〜2)。2x を超えると崩れるが、
+    それは純粋なスケール由来(oracle 補正でほぼ完全回復)。
+  - `experiments/0023`(job 10517): 細かい centroid + ガードバンドで
+    `embed_image_tiles_auto_scale` を復活できるか atlas GT で再測定 → **否定的**。
+    FM centroid のスケール推定は**病理テクスチャの粗さを低倍率と誤認**し
+    (グリコーゲン沈着・肥大肝細胞など)、しかも**推定が bimodal(0.5 か 2.0、1.0 付近を
+    まず出さない)なのでガードバンドが不発**。細粒度化は synthetic の推定 median は
+    改善するが atlas GT では旧 centroid より悪化(1勝2敗 vs 2勝1敗)。**動く所見
+    Glycogen の best_rank が 7 → 100+ に破壊される**のが致命的。
+  - **結論**: 倍率補正はコアパイプラインに入れない(棚上げ継続)。クエリはコーパスの
+    20x から ±2x(概ね 10〜40x)以内で与えること。特定クエリが明らかに要補正なら
+    **既知の係数で手動リサイズ**して no-correction と A/B する(自動推定は信用しない)。
 - **アトラスGT比較の位置づけ**: アトラス図版をクエリにする
   `scripts/validate_against_ground_truth.py` のbest_rankが悪いカテゴリの主因は、
   モデルの表現力ではなく **アトラス→TG-GATEsのドメインギャップ + 図版が所見と無関係な
@@ -93,7 +125,9 @@ Ground truth比較(`scripts/validate_against_ground_truth.py`)のクエリ画像
   なお 2026-09-09 の 0018 昇格後、`outputs/gt_validation_results.csv` は
   `baseline_v1` = 0018 で再生成済み(job 10499)。0018 での 7 カテゴリは 0002 と
   ほぼ同じ(Kupffer best 76→78、Hypertrophy 23→24、他は不変〜±3。下記「背景パッチ」
-  の GT A/B と一致)。旧 0002 baseline_v1 の値は
+  の GT A/B と一致)。**2026-09-10 に対照図版除外(job 10511)を反映して再々生成**、
+  Hypertrophy は best 30 / found 24 に(理由は下の「2026-09-10 修正」バレット)。
+  旧 0002 baseline_v1 の値は
   `outputs/gt_validations/gt_validation_results_2026-09-09_deblank_ab_job10495.csv` に残る:
 
   | カテゴリ | baseline_v1 best (前→後) | v1_macenko best (前→後) |
@@ -110,6 +144,26 @@ Ground truth比較(`scripts/validate_against_ground_truth.py`)のクエリ画像
   README 各所の「Kupffer は最悪カテゴリ(best_rank 202)」という記述は誤格納由来を含んでおり、
   実際の値は 76(それでも良くはないが、ドメインギャップの状況証拠としての重みは下がる)。
   融合壊死は図版を10枚に戻しても改善せず(10 → 14)、「表現の限界」という結論は変わらない。
+
+- **【2026-09-10 修正】対照図版(`is_normal_control`)をクエリから除外した(job 10511)。**
+  誤格納修正とは別に、NNL の lesion ページには「Normal liver, age and sex matched, for
+  comparison with Figure N」という**正常肝の対照図版**が一部混ざっている(肝では Atrophy
+  2枚・Hepatocyte - Hypertrophy 2枚の計4枚のみ。他の所見にはない)。GT 7カテゴリでこれを
+  持つのは Hypertrophy だけ。全 lesion ページの caption を `data/query/nnl_liver_atlas_figures.csv`
+  に収集し、`lib/atlas_figures.py` の `query_images()` が `is_normal_control=yes` を落とす
+  ようにした(`validate_against_ground_truth.py` / `experiments/0020` が共有)。
+  除外後、**Hypertrophy は best_rank 24 → 30 と悪化し、found も 25 → 24**(GT 25 スライド
+  中1件が上位500から外れた)。正常肝タイルが「たまたま hypertrophy の GT スライドを含む
+  汎用肝細胞」を引いて順位を底上げしていたため。除外は正直な数字であって改善ではない。
+  他6カテゴリはフォルダ内容不変だが best_rank が 0〜5 ずれた(mitosis 7→10、髄外造血
+  25→28、封入体 480→475、Kupffer 76→78、融合壊死 14・Glycogen 7 は不変。下記の注記参照)。
+  `outputs/gt_validation_results.csv` は job 10511 の値で再生成済み。
+- **atlas GT 数値には ±5 位程度の非決定性ノイズがある**。`lib.query_embedding.embed_image_tiles`
+  の UNI 埋め込みは GPU の fp16/bf16 演算が run-to-run で完全一致せず、同じクエリ図版でも
+  再実行のたびに埋め込みが僅かに変わる。job 10511 では**フォルダ内容が全く変わっていない
+  6カテゴリの best_rank が 0〜5 位ずれた**。したがって atlas GT の best_rank/mean_rank は
+  「±5 位以内の差は誤差」として読むこと(self_retrieval 診断はコーパス側の固定埋め込みを
+  使うのでこの影響を受けない — 一次評価を self_retrieval に置く理由のひとつ)。
 
 - **アトラス画像1枚は所見部位を含む図版全体であり、所見が写っているのは画像の一部分に
   過ぎない**(矢印注釈・番号ラベル・周囲の正常組織や余白を含む、1800x1200px程度の
@@ -140,11 +194,13 @@ Ground truth比較(`scripts/validate_against_ground_truth.py`)のクエリ画像
       検証済みの交絡なし再検証(`experiments/0010`→`0012`→GT比較→`experiments/0013`
       の可視化)まで行い、確定的に棚上げ。詳細は下記「クエリ側染色正規化の再検証」
       「可視化の再検証」参照
-- [ ]  **uni v2など他モデルでの埋め込みを検討する** — ただし自己検索診断
-      (2026-09-04、2026-09-08にバッチ交絡対応で拡張)で「uni_v1はバッチ交絡抜きでも
-      5〜6のcommonな肝所見を検索に足るレベルで表現できている、明確な例外は融合壊死と
-      髄外造血」と判明したため、**全所見のためではなくこの2所見のための調査**として
-      位置づける。下記「自己検索診断」参照
+- [x]  ~~**uni v2など他モデルでの埋め込みを検討する**(融合壊死・髄外造血のため)~~
+      → 2026-09-10、`experiments/0021` の弁別力プローブ(wsi_preprocess が
+      necrosis 13 / single cell 4 / hematopoiesis 3 スライド + confuser 106 を
+      `uni_v2` / `virchow2` / `hibou_l` で埋め込み、私が LOSO AUROC を計算)で
+      **否定的**。どのモデルも uni_v1 を CI が重ならないレベルで上回れず、髄外造血は
+      全モデル AUROC ≤ 0.47(chance 以下)。フル再埋め込み(Task B)は見送り。
+      下記「experiments/0021」参照
 - [x]  ~~IVFクラスタリングの粗さが近似検索の精度を下げている可能性の検証~~
       → 2026-08-19、uni_v1で検証済み・否定的な結論。詳細は下記「IVFクラスタリング
       仮説の検証状況」参照
@@ -1220,6 +1276,303 @@ self_retrieval_diagnostic / 0015 の TG-GATEs アームは2軸で違っていた
 `run_slurm.sh` の `PRE_NATIVE_COMMAND` で index + h5 をノードローカル NVMe にステージ
 してから読む(`PVS_INDEX_DIR` / `PVS_FEATURES_DIR` 等)。`USE_LOCAL_SSD_INPUT=1` は
 `data/`(844G)全体を rsync するので使わない(job 10421 はこれで TIMEOUT した)。
+
+## experiments/0020: 初代アトラス検索 Artifact の作り直し(2026-09-10、job 10501)
+
+プロジェクト最初期に作った検索デモ Artifact — NNL アトラスの所見図版をクエリに、
+所見ごとに「クエリタイル行」と「コーパスから引いた上位パッチ行(slide_id / sim)」を
+並べ、「望んでいるほど似ていない画像も多く得られてしまった」で終わっていたもの —
+を、この1か月の改善(背景除去 0018、評価軸の刷新、成果物パイプライン)を反映して
+同じ立て付けで作り直した。
+
+- **スイープ(`experiments/0020` / `experiment.py`、job 10501)**: NNL アトラス25所見を
+  フォルダ単位で集約(所見フォルダ = 1クエリ、フォルダ内の全図版を統合)。
+  `uni_v1` plain タイリング(染色正規化なし = 現行既定経路)、探索は
+  `notebooks/01_query_demo.ipynb` の推奨値(`rerank_pool=200` / `max_tiles_reranked=12`)。
+  各所見を **`0018`(背景除去済み・現行既定)と `0002`(背景除去前)の両索引**で検索し、
+  上位10パッチを raw WSI から実解像度クロップ。所見ごとに `query_tiles/` `hits_deblank/`
+  `hits_predeblank/` `finding.json` を出力。25/25 成功・クロップ失敗0件、約10分。
+- **レポート(`scripts/build_atlas_report.py`、run_slurm.sh が続けて呼ぶ)**: スイープ出力 +
+  `outputs/0019`(glycogen/ground glass/granular の deliver 成果物)+ 自己検索診断 CSV
+  (`self_retrieval_diagnostic_{0018,0002_predeblank}.csv`)から self-contained な
+  `outputs/0020_.../report.html` を生成(画像は base64 JPEG 埋め込み、外部依存は
+  Google Fonts のみ)。Artifact: https://claude.ai/code/artifact/a34cf5e1-b488-4571-8027-065c20098df3
+- **発見: 背景除去は max_similarity 上位パッチをほとんど動かさない**。所見別の 0018 vs 0002
+  上位10枚は、組織マッチが強い所見(融合壊死・脂肪変性)では**完全一致**、背景の彩度帯に
+  近い所見(色素沈着・クッパー細胞増殖)では**上位が入れ替わる**という幅。背景除去の主効果は
+  ここではなく**スライド単位の `n_hits_ratio` ランキング**に出る(「背景パッチ」節の
+  self_retrieval `sim_best_rank` 改善と整合。max_similarity 上位パッチは元々ほぼ組織)。
+- sim レンジは 0.47〜0.71 で初代 Artifact(0.5〜0.69)と同水準。「あまり似ていない」ままの
+  所見が多いのは、多くの所見で 0018 の上位が「所見と無関係な正常組織」で埋まるため —
+  モデルの表現力ではなく **アトラス→TG-GATEs のドメインギャップ**が主因(0014 の #1 ブロッカー、
+  0016 で補強)。
+- **対照図版の除外(job 10513、`--overwrite` 再実行)**: NNL の lesion ページには一部
+  「Normal liver ... for comparison with Figure N」の**対照図版**が混ざる(肝では Atrophy
+  2枚・Hepatocyte - Hypertrophy 2枚の計4枚のみ)。`lib.atlas_figures.query_images()` が
+  `data/query/nnl_liver_atlas_figures.csv` の `is_normal_control=yes` を見て除外する
+  ようにし、0020 のクエリセットも Atrophy 4→2枚・Hypertrophy 9→7枚に絞って作り直した。
+  除外対象外の23所見は sim レンジ・上位パッチとも前回(job 10504)と一致(スイープ経路は
+  実質再現的。`validate_against_ground_truth.py` 側は下記の通り数枚の順位揺れが出る)。
+- **運用メモ**: `USE_LOCAL_SSD_OUTPUT=0`(NFS 直書き)。=1 にすると「スイープをスキップして
+  レポートだけ作り直す」再実行で `build_atlas_report.py` が空のスクラッチを見て所見出力を
+  取りこぼす(job 10503 で発生、10504 で修正)。`experiment.py` は全所見完了済みなら索引
+  ロードも省くので、レポートのみの再実行は1〜2分。25所見完了済みなら `PRE_NATIVE` の
+  72G ステージングもスキップする。`run_slurm.sh` の `--overwrite` は反映後に外すこと
+  (job 10513 後に外した。figure フォルダやクエリパラメータを変えたときだけ一時的に足す)。
+
+## experiments/0021: 多モデル埋め込み弁別力プローブ — 融合壊死・髄外造血(2026-09-10、job 10510)
+
+自己検索診断(下記)で uni_v1 の明確な弱点だった融合壊死(`Necrosis`)と髄外造血
+(`Hematopoiesis, extramedullary`)について、他エンコーダが phenotype をより分離できるかを
+**全 1,800万パッチの再埋め込みに踏み切る前に**安価に測った。埋め込みは wsi_preprocess
+(GPU、`HANDOFF_multimodel_encoder_probe.md`)、弁別力の計算は patch-vector-search 側
+(`experiments/0021`、索引なし、numpy のみ)。
+
+- **probe セット**: `single_finding_liver.csv` の単一所見コーパススライド —
+  necrosis 13(11 EXP)/ single cell necrosis 4(参考)/ hematopoiesis 3 — と
+  confuser 106(3ターゲット以外の単一所見スライド全部)を、各スライド最大100パッチ
+  (背景除外)で `uni_v1` / `hibou_l` / `uni_v2` / `virchow2` の4モデルに埋め込み
+  (12,600 パッチ × 4)。TRIDENT `encoder_factory`、224px 入力、L2 正規化なし。
+- **主指標 LOSO AUROC**(パッチを「その所見 vs confuser」に分類。スコア = 別スライドの
+  同所見パッチとの top-10 平均コサイン。スライド単位 cluster bootstrap で 95% CI):
+
+  | finding | uni_v1 | hibou_l | uni_v2 | virchow2 |
+  |---|---|---|---|---|
+  | necrosis | 0.655 [0.57–0.72] | 0.541 [0.45–0.64] | 0.703 [0.61–0.78] | 0.648 [0.58–0.72] |
+  | hematopoiesis | 0.437 [0.25–0.60] | 0.471 [0.35–0.65] | 0.322 [0.24–0.41] | 0.316 [0.27–0.36] |
+  | single cell necrosis | 0.744 [0.49–0.90] | 0.461 [0.28–0.65] | 0.687 [0.24–0.96] | 0.673 [0.46–0.82] |
+
+- **結論: 否定的。フル再埋め込み(Task B)は見送り。**
+  - **どのモデルも uni_v1 を CI が重ならないレベルで上回れない**。necrosis で uni_v2 の
+    点推定がわずかに高い(0.703 vs 0.655)が CI は大きく重なり、しかも uni_v2 の
+    within(same-EXP) 0.678 vs within(diff-EXP) 0.402 という開きは、その差が phenotype
+    でなく**実験バッチ由来**であることを示す(uni_v1 は 0.561 / 0.492 で開きが小さい)。
+  - **髄外造血は全モデル AUROC ≤ 0.47(chance 0.5 以下)**。3スライドと極小で決定的では
+    ないが、方向は明確 — どのエンコーダも髄外造血パッチを引けない。極小・sub-patch な
+    焦点性所見で、分裂像と同じ「patch レベル検索の対象外」クラスの可能性が高い。
+  - hibou_l(非ヒト事前学習を含むとされる)は全所見で最下位に近く、「非ヒト事前学習が
+    ラット肝に効く」仮説はこのプローブでは支持されなかった。
+- **留保**: n が小さい(13 / 4 / 3 スライド)。テストしたのは4モデルのみ(phikon_v2 /
+  hoptimus1 / conch / gigapath 未試験)だが、独立系統の大規模 FM である uni_v2 と
+  virchow2 が**両方とも** uni_v1 を超えられなかったことが強いシグナル。プローブは
+  patch レベルの弁別(検索の必要条件)を測ったもので十分条件ではないが、必要条件を
+  満たせない以上フル索引でも改善しないと判断。→ この2所見の弱点はエンコーダではなく
+  **コーパスカバレッジ(融合壊死スライドの化合物多様性)とタスク定義**の側にある。
+
+## experiments/0022: 合成再スケール検索評価 — 倍率ずれの影響を正解既知で定量(2026-09-10、job 10516)
+
+「クエリ画像の見かけ倍率がコーパス(20x)からずれると検索がどれだけ落ちるか」を、
+**コーパス自身から作った正解スライド既知の合成クエリ**で測った。test-time スケール探索
+(option C)に着手する前に、そもそも補正すべき劣化が存在するか・それがスケール由来か
+を確かめるための前段。atlas GT(ノイズ大・de-emphasize 済み)ではこの問いに答えられない。
+
+- **合成**: 0018 索引のコーパススライドを random 40 枚 → 各スライドの実パッチ座標に
+  アンカーした 4×4 ブロックを raw WSI から「倍率比 r で撮影されたように」読み出し
+  (level-0 で `round(4·P/r)` px の窓 → 4·224px にリサンプル、P = スライドごとの
+  `patch_size_level0`)。120 領域 × r ∈ {0.35, 0.5, 0.71, 1.0, 1.41, 2.0, 2.83}。
+  r>1 = コーパスより拡大、r<1 = 縮小。
+- **3 アーム**(同じ合成クエリ画像に対して): `fixed`(そのまま `embed_image_tiles`
+  = 現行パイプライン)/ `oracle`(r 既知として 1/r リサイズしてからタイル化 = 完全補正の
+  上限)/ `autoscale`(`embed_image_tiles_auto_scale` の FM centroid 投票)。
+  指標は `search_top_slides_multi`(n_hits_ratio ランキング)での正解スライド順位。
+- **median 順位 / found@10**:
+
+  | | r=0.35 | r=0.5 | r=0.71 | r=1.0 | r=1.41 | r=2.0 | r=2.83 |
+  |---|---|---|---|---|---|---|---|
+  | fixed  median | 14.5 | 2 | 1 | 1 | 1 | 2 | 21.5 |
+  | oracle median | 4 | 1 | 1 | 1 | 1 | 1 | 1 |
+  | autoscale median | 4 | 1 | 1 | 1 | 1 | 1 | 1 |
+  | fixed found@10 | 0.42 | 0.90 | 0.97 | 0.99 | 0.95 | 0.84 | 0.33 |
+  | oracle found@10 | 0.62 | 0.97 | 0.97 | 0.99 | 0.97 | 0.93 | 0.91 |
+
+- **発見1: UNI は ±2x の倍率ずれに対して頑健**。`fixed` は r ∈ [0.5, 2.0](4 倍幅)で
+  median 順位 1〜2・found@10 ≥ 0.84。**実運用上、2 倍以内の倍率不一致は非問題**。
+  r=1 サニティ(median 1・found@1 0.78)も OK。
+- **発見2: 2x を超えると崩れ、その崩れはスケール由来で補正可能**。
+  - r=2.83(拡大しすぎ): `fixed` median 21.5・found@10 0.33 → `oracle` median **1**・
+    found@10 **0.91**。ほぼ完全に回復 = 純粋なスケール不一致。
+  - r=2.0: found@10 0.84 → 0.93、mean 順位 14.1 → 5.9(裾が縮む)。
+  - r=0.35(縮小しすぎ): `fixed` median 14.5 → `oracle` **4**、found@10 0.42 → 0.62。
+    **部分回復のみ**。広視野クエリを固定 px にリサンプルした時点で失われる情報
+    (corpus タイル相当あたりの解像度低下)は完全補正でも戻らない。
+- **発見3: 点推定補正(`autoscale`)が oracle とほぼ同じ**。棚上げ時の「GT 7/7 で悪化」は
+  **真の倍率が不明でコンテンツ混在の atlas 図版**で測ったもの。単一倍率・正解既知の
+  合成クエリでは、投票推定は完全知識と同等に >2x の劣化を回復する。→ **フルな
+  スケール探索(C)は不要。必要なのは `embed_image_tiles_auto_scale` の復活。**
+  - ただし centroid グリッドが粗い({0.5,1,2,4,8})。r=0.71/1.41(真の補正 1.41/0.71)は
+    最近傍 centroid にスナップして |log err| 0.35 になる。retrieval 結果には響いていない
+    (その帯は `fixed` が既に良いため)が、**centroid に 0.71 / 1.41 を足すべき**。
+  - r>1(拡大クエリ、補正係数 1/r<1)は centroid 下限 0.5 で頭打ち。r=2 は 1/r=0.5 で
+    たまたま合うが、それ以上の拡大は当てられない。
+- **この測定の限界**: 合成クエリは単一倍率かつ検索対象と同一スライド由来(in-distribution・
+  完全一致パッチが必ず存在する易しいケース)なので、順位の絶対値は best-case。
+  アーム間の相対比較が目的なのでそこは問題ない。→ 実際の atlas 図版でどうかは
+  `experiments/0023` で検証(下記、否定的)。
+
+## experiments/0023: autoscale 復活の検証 — 否定的、倍率補正は決着(2026-09-10、job 10517)
+
+0022 の「点推定補正で >2x を回復できる」を受けて、`embed_image_tiles_auto_scale` を
+(a) centroid 細粒度化 + (b) ガードバンド付きで復活できるか、(c) atlas GT 7 カテゴリで
+再測定した(0018 索引、対照図版除外済み、4 アーム: baseline / autoscale_orig /
+autoscale_fine_guard / autoscale_fine_noguard)。
+
+- **(a) centroid 再ビルド**: `build_scale_reference_centroids` を
+  scales `{0.35,0.5,0.71,1,1.41,2,2.83}` で(20 スライド × 4 サンプル)。
+  `outputs/0023_.../revive/scale_centroids_fine.npz`(**昇格せず**)。
+- **(a-val) 推定精度**(合成再スケールクエリ・検索なし、旧 vs 新 centroid の
+  `|log(scale_est / (1/r))|` median): 全体 median は旧 0.049 → 新 0.010 と改善するが、
+  **内訳はまだら** — 新は r=0.71/2.83 を直す一方 r=0.5 を新たに悪化させ(0.00→0.35)、
+  r=1.41 は両方 0.34 のまま。細粒度化で個々の投票のノイズが増える。
+- **(c) atlas GT best_rank(baseline → 各アーム)**:
+
+  | category | n_gt | baseline | orig | fine_guard | fine_noguard |
+  |---|---|---|---|---|---|
+  | Hypertrophy | 25 | 30 | **23** | 30 | 30 |
+  | Single cell necrosis | 4 | 14 | 13 | 13 | 13 |
+  | Increased mitosis | 10 | 10 | 9 | 9 | 9 |
+  | **Deposit, glycogen** | 6 | **7** | **113** | **101** | **101** |
+  | Hematopoiesis, extramedullary | 3 | 28 | 25 | **51** | **51** |
+  | Proliferation, Kupffer cell | 2 | 78 | **33** | **33** | **33** |
+  | Inclusion body | 1 | 475 | 消失 | 消失 | 消失 |
+
+  勝敗(±5 位はノイズで引き分け): orig **2勝1敗**、fine_guard/fine_noguard **1勝2敗**
+  (+ Inclusion body は全アームで GT スライドが top-1000 から消失、found 1→0)。
+
+- **結論: 否定的。autoscale は棚上げ継続。** 決め手:
+  - **推定器は病理テクスチャの粗さを低倍率と誤認する**。Glycogen 図版の推定スケールは
+    `[1.0, 0.5, 0.5, 0.5]`(= 「2x 拡大されている」)で 2x 縮小補正がかかるが、baseline
+    best_rank 7 が示す通り実際はほぼ正しいスケール。グリコーゲンで膨れた明るい
+    hepatocyte が「粗い = 高倍率」と読まれる(fatty change の既知失敗と同型、
+    `lib/mpp_estimation.py` docstring 参照)。結果 best_rank 7 → 100+ に破壊。
+  - **推定が bimodal でガードバンドが不発**。7 カテゴリの全図版の推定は 0.35 / 0.5 /
+    2.0 / 2.83 ばかりで 1.0 付近(ガード帯 [0.625, 1.6])をまず出さない。だから
+    `fine_guard` と `fine_noguard` の結果が完全一致(ガードが一度も発火しない)。
+  - **細粒度化は逆効果**。synthetic の推定 median は良くなるが、atlas 図版では
+    0.5→0.35 / 2.0→2.83 とより極端な補正になり、旧 centroid より悪化。
+  - 「勝ち」の 2 つも脆い: Kupffer は GT 2 枚・1 化合物でバッチと分離不能、
+    Hypertrophy 30→23 は atlas GT の ±5 ノイズ + 単発の域。
+- **これで倍率スレッドは閉じる**。0022 = `fixed` は ±2x に頑健、0023 = それを超える
+  領域の自動推定は out-of-domain クエリでは信用できない。要補正なら既知係数で手動。
+
+## experiments/0024: 類似度指標の再ランク比較 — 異方性除去 / hubness 補正(2026-09-10、jobs 10525/10534)
+
+引き継ぎ資料の「類似度の算出方法はほかにあるのか」。現行の「L2 正規化コサイン」には
+2 つの既知の弱点があり(下記)、それを self_retrieval と同じ土俵(コーパス内 LOO、
+atlas なし、正解 = 同一 FINDING_TYPE の別スライド)で、**FAISS を使わずスライドあたり
+100 パッチの厳密行列**で 9 アーム A/B した(GPU 不要、9 分)。
+
+- **弱点1: 異方性**。UNI 埋め込みは球面に一様分布せず、平均ベクトル μ のノルムが大きい
+  → 任意 2 パッチのコサインが軒並み 0.4-0.6(atlas の「0.5..0.69」の下駄)。ただし
+  **測ってみると軽度** —— 共分散の第1主成分の寄与率は 9.1%、上位8個で 40%(単一の
+  支配的 nuisance 軸は無い)。
+- **弱点2: hubness**。一部のコーパスパッチ(分布中心に近い「ありふれた正常肝細胞」)が
+  多数のクエリの kNN に出現し、所見パッチの枠を奪う(0007-0009 で文書化済み)。
+- **アーム**: `center`(μ 除去)/ `abtt{1,2,4}`(上位 d 主成分を除去、Mu & Viswanath 2018)/
+  `whiten`(ZCA 白色化 `W=(Σ+εI)^{-1/2}`)/ `csls`(Conneau et al. 2018、
+  `csls(q,c)=2cos − r_T(c) − r_S(q)`、r_T = c のコーパス内 kNN 平均コサインで hub にペナルティ)/
+  `csls_abtt2` / `csls_whiten`。
+
+- **所見横断 median best_rank(低いほど良い)**:
+
+  | arm | sim (max_similarity) | **nhr (n_hits_ratio proxy)** |
+  |---|---|---|
+  | cosine(baseline) | 62.5 | 86.2 |
+  | abtt4 | 56.0 | 43.2 |
+  | **whiten** | 52.5 | **42.0** |
+  | csls | **39.5** | 66.8 |
+  | csls_abtt2 | **37.2** | 61.0 |
+  | csls_whiten | 51.5 | 45.5 |
+
+- **発見: 2 つの対策が別々の失敗モードを叩き、併用では stack しない**。
+  - **CSLS は `sim`(max_similarity)ランキングを 62.5 → 37-40**(約 40% 減)。hubness 補正が
+    予測通り効く。
+  - **whiten / abtt4 は `nhr`(n_hits_ratio、本番のランキングキー)を 86 → 42-43**(約 50% 減)。
+  - `csls_whiten` は両者の良いとこ取りにならない(sim 51.5・nhr 45.5)。白色化で
+    hub 構造が既に崩れているため CSLS の伸びしろが消える。
+- **最大の伸びは repo が「壊れている」と分類していた所見**(nhr、best_rank median):
+
+  | finding | cosine | 最良アーム |
+  |---|---|---|
+  | Hematopoiesis, extramedullary | **1000(未検出)** | abtt4: **35** |
+  | Degeneration, granular, eosinophilic | 160 | whiten: **11** |
+  | Single cell necrosis | 124 | csls_whiten: **52** |
+  | Necrosis(凝固壊死) | 48 | abtt4/center: 36 |
+  | Hypertrophy | 41 | whiten: 26 |
+
+  → **「融合壊死・髄外造血はエンコーダの本物の弱点」という自己検索診断の結論は一部修正が
+  必要** —— その相当部分は**エンコーダではなく類似度指標の hubness/異方性**だった。
+  コーパスカバレッジで詰んでいる所見(Kupffer, Lesion NOS, Vacuolization/Alteration
+  cytoplasmic)は全アーム 1000 のまま(想定通り、指標では動かない)。
+- **本番ランキングキーは n_hits_ratio なので `whiten` を採る**。`abtt4`(行列逆計算・ε
+  不要、上位 4 成分を引くだけ)を安価な代替として A/B。回帰リスクは低い(whiten は
+  Swelling 12→13 以外ほぼ中立〜改善)。
+- **留保**: コーパス部分サンプル(100/slide)・nhr は proxy(top-hit_k)・所見あたり
+  ~10 クエリスライドの median(Change eosinophilic は 175〜1000 で振れる)。本番
+  パイプラインでの確認が必須。
+- **次**: `whiten` / `abtt4` を索引再構築時のコーパス変換として入れてフル測定 → `experiments/0025`。
+
+## experiments/0025: 異方性除去変換を索引にベイクしてフル測定(2026-09-10、job 10546)
+
+`experiments/0024` の whiten / abtt4 を、コーパス部分サンプルの厳密行列ではなく
+**本番の OPQ+IVF+PQ 索引にベイク**(`lib.embedding_transform.make_faiss_pretransform` →
+`faiss.LinearTransform` + `NormalizationTransform` を index チェーンに prepend。
+`faiss.write_index`/`read_index` で変換ごと保存・復元され、**add/search 双方に自動適用**
+= `self_retrieval_diagnostic` も `validate_against_ground_truth` もコード変更ゼロ)して
+フル 18M パッチで再構築(`outputs/0017` の training_sample から fit、0018 と同一ハイパラ)。
+`scripts/validate_against_ground_truth.py` に `--index-dir` を追加。
+
+- **self_retrieval_diagnostic(フル FAISS、`nhr_best_rank_med_noexp` = バッチ交絡除外の主指標)**:
+
+  | finding | baseline(0018) | whiten | abtt4 |
+  |---|---|---|---|
+  | Degeneration, granular, eosinophilic | 298 | **20** | 54 |
+  | Hypertrophy | 59.5 | **38.5** | 50 |
+  | Necrosis | 52 | **34.5** | **31** |
+  | Increased mitosis | 59.5 | **39** | 48.5 |
+  | Deposit, glycogen | 21 | **11.5** | 13 |
+  | Ground glass appearance | 17 | **8.5** | 14 |
+  | Hematopoiesis, extramedullary | 125 | **91** | 98 |
+  | Change, eosinophilic | 146 | **239** ✗ | 267 ✗ |
+  | Cellular infiltration | 12 | **23** ✗ | 22 ✗ |
+  | Single cell necrosis | 44 | 45.5 | 63.5 ✗ |
+
+  **whiten: 7 所見改善 / 2 所見悪化 / 残り中立** —— 主指標では正味プラス。特に
+  granular(298→20)・壊死・肥大・glycogen・ground glass・髄外造血で大きい。
+  **abtt4 は 3 改善 / 3 悪化とほぼ相殺、whiten に劣る**(0024 の部分サンプルでは両者
+  近かったが、フル FAISS では差がついた)。
+- **atlas GT(7 カテゴリ、de-emphasize 済み・±5 ノイズ)は whiten で悪化**:
+
+  | category | baseline | whiten | abtt4 |
+  |---|---|---|---|
+  | Hypertrophy | 30 | 21 | 49 |
+  | Single cell necrosis | 14 | **45** ✗ | 52 ✗ |
+  | Hematopoiesis, extramedullary | 28 | **109** ✗✗ | 179 ✗✗ |
+  | Deposit, glycogen | 7 | **15** ✗ | 12 |
+  | Kupffer | 78 | 72 | 48 |
+
+  (ただし `found` はむしろ増える: whiten は全カテゴリで GT 全数を top-1000 内に retrieve、
+  baseline は Hypertrophy 24/25・mitosis 9/10。)
+- **機序**: 白色化は共分散を等方化する = 小さい固有値の方向を `1/√λ` 倍に増幅する。
+  コーパス内クエリでは埋もれた病理シグナルが浮上する(self_retrieval で改善)が、
+  **atlas 図版のように corpus-μ から遠い out-of-distribution クエリでは、その増幅が
+  ドメインギャップのノイズを増幅する**(atlas GT で悪化)。self_retrieval の
+  Change eos / Cellular infiltration の悪化も、白色化が効きすぎて元のジオメトリの
+  有用な部分まで崩している兆候。
+- **結論: 有望だが既定索引への昇格は保留**。whiten は主指標(コーパス内検索)で
+  難しい所見を大きく改善するが、(a) 動いていた common 所見 2 つを悪化、(b) atlas
+  クエリを悪化。次の選択肢:
+  - **収縮白色化**(identity と full-whiten を α で内挿: `(αΛ + (1−α)·meanλ·I + εI)^{-1/2}`、
+    α ∈ {0.3,0.5,0.7})で効きすぎを抑える → `experiments/0026`(0025 の infra 再利用、W だけ差し替え)
+  - **PCA 白色化 + 裾切り**(上位 k 次元だけ白色化)
+  - **whiten_v1 を成果物トラック専用の索引に**(0015/0019 の per-finding パッチ集は
+    コーパス内処理で atlas クエリ無し → whiten の恩恵だけ受けられる。特に granular を再挑戦)。
+    対話/atlas デモは 0018 のまま。
+- **昇格時の TODO**: `lib.search._exact_similarity`(パッチ再ランク、生 h5 を読む)にも
+  同じ変換を通すこと。0025 の測定は slide ランキング(`search_top_slides_multi`、h5 再ランク
+  なし)のみなので現状は未対応。
+- **既知の小欠陥**: `lib.faiss_index` は `logging.getLogger("lib.faiss_index")` に出力するが
+  実験側は `exp****` ロガーにしかハンドラを付けないので、索引構築の進捗ログ
+  (「added X/Y slides」等)が experiment.log に出ない(0018 でも同様)。
 
 ## 次の一手(成果物トラック)
 
