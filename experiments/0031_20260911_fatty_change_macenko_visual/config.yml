@@ -34,7 +34,12 @@ tile_size: 224
 k: 20
 nprobe: 32
 rerank_pool: 200
-max_tiles_reranked: 12
+# 8図版・501タイルと多く、max_tiles_reranked を絞ると近似スコア上位に生き残った
+# タイルだけが候補になり、n_hits_ratio ベースの top_slides と厳密re-rankの
+# hit_pool がほぼ重ならずギャラリーが空になった(job 10599、galleries written: 0
+# ×2腕)。全タイルを厳密re-rankする(experiments/0009/0013 の「GT未検証だが
+# タイル選択バイアスに効く」設定)。
+max_tiles_reranked: null
 k_candidates: 8000
 top_n_slides: 20
 top_n_slides_to_plot: 3
