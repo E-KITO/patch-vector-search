@@ -16,6 +16,13 @@ class PatchIndex:
     manifest: pd.DataFrame  # indexed by global_idx
     slide_meta: pd.DataFrame  # indexed by slide_id
     features_dir: Path
+    # experiments/0025 で FAISS 索引に異方性除去変換をベイクした場合、その変換
+    # パラメータ(lib.embedding_transform.load_transform の戻り値)。索引自体は
+    # add/search で自動的にこの変換を適用するが、_exact_similarity は生の h5
+    # ベクトルを直接読むため索引を経由せず、同じ変換をここで明示的に適用しないと
+    # 近似候補プール(変換後空間)と厳密re-rank(変換前空間)が食い違う
+    # (README「experiments/0025」の「昇格時のTODO」参照)。変換無しの索引では None。
+    transform: dict | None = None
 
     @classmethod
     def load(
@@ -24,11 +31,17 @@ class PatchIndex:
         manifest_path: str | Path,
         slide_meta_path: str | Path,
         features_dir: str | Path,
+        transform_path: str | Path | None = None,
     ) -> "PatchIndex":
         index = faiss.read_index(str(index_path))
         manifest = pd.read_parquet(manifest_path).set_index("global_idx", drop=False)
         slide_meta = pd.read_parquet(slide_meta_path).set_index("slide_id")
-        return cls(index=index, manifest=manifest, slide_meta=slide_meta, features_dir=Path(features_dir))
+        transform = None
+        if transform_path is not None:
+            from lib.embedding_transform import load_transform
+            transform = load_transform(transform_path)
+        return cls(index=index, manifest=manifest, slide_meta=slide_meta,
+                   features_dir=Path(features_dir), transform=transform)
 
     def _set_nprobe(self, nprobe: int) -> None:
         # lib.faiss_index.build_faiss_index wraps the IndexIVFPQ inside an
@@ -46,7 +59,17 @@ class PatchIndex:
         (a small shortlist, so the extra I/O is cheap) and recomputes the
         true inner product against the (already L2-normalized) query_vec.
         `candidates` must have a plain 0..N-1 positional index.
+
+        If self.transform is set (see PatchIndex.transform), both the raw
+        candidate vectors and query_vec are passed through the same
+        anisotropy-removal transform the FAISS index has baked in, so this
+        exact re-rank stays in the same space as the approximate candidate
+        pool that produced `candidates`.
         """
+        if self.transform is not None:
+            from lib.embedding_transform import apply_transform
+            query_vec = apply_transform(self.transform, query_vec.reshape(1, -1))[0]
+
         similarities = np.empty(len(candidates), dtype=np.float32)
         for slide_id, positions in candidates.groupby("slide_id").indices.items():
             local_idx = candidates["local_idx"].to_numpy()[positions]
@@ -54,7 +77,13 @@ class PatchIndex:
             sort_order = np.argsort(local_idx)
             with h5py.File(self.features_dir / f"{slide_id}.h5", "r") as f:
                 vectors = f["features"][local_idx[sort_order]].astype(np.float32)
+            # apply_transform assumes L2-normalized input (fit_whiten's
+            # docstring: "X は L2 正規化済みを想定") — the raw h5 vectors are not
+            # unit-norm (~38 here), so normalize first or the mu-centering step
+            # operates at the wrong scale and silently produces garbage.
             faiss.normalize_L2(vectors)
+            if self.transform is not None:
+                vectors = apply_transform(self.transform, vectors)
             sims_sorted = vectors @ query_vec
             sims = np.empty_like(sims_sorted)
             sims[sort_order] = sims_sorted
