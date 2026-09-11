@@ -120,9 +120,9 @@ def main() -> None:
     project_root = _get_project_root()
     sys.path.insert(0, str(project_root))
 
+    from lib.finding_routing import load_index_for_finding
     from lib.output_utils import complete_run, get_run_dir, write_run_metadata
     from lib.patch_set import build_patch_set
-    from lib.search import PatchIndex
 
     exp_name = os.environ["EXP_NAME"]
     output_root = os.environ.get("OUTPUT_ROOT")
@@ -141,7 +141,6 @@ def main() -> None:
     logger = setup_logger(run_dir, exp_name)
 
     seed = int(config.get("seed", 42))
-    index_exp_dir = project_root / config["index_exp_dir"]
     features_dir = project_root / config["features_dir"]
     raw_slide_dir = project_root / config["raw_slide_dir"]
     gt_csv = project_root / config["gt_csv"]
@@ -164,12 +163,11 @@ def main() -> None:
 
     rng = np.random.default_rng(seed)
 
-    pi = PatchIndex.load(
-        index_path=index_exp_dir / "index.faiss",
-        manifest_path=index_exp_dir / "manifest.parquet",
-        slide_meta_path=index_exp_dir / "slide_meta.parquet",
-        features_dir=features_dir,
-    )
+    # lib.finding_routing: 所見ラベルごとに baseline/whiten 索引を出し分ける
+    # (README「所見ごとのルーティング表」参照)。現状の SUPPORTED_FINDINGS は
+    # いずれも whiten 対象外なので、このリストが変わらない限り baseline と
+    # 同じ結果になる。
+    pi = load_index_for_finding(args.finding, features_dir)
     corpus_slides = set(pi.slide_meta.index.astype(str))
 
     gt = pd.read_csv(gt_csv)
