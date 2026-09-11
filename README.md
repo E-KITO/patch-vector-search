@@ -1574,6 +1574,51 @@ atlas なし、正解 = 同一 FINDING_TYPE の別スライド)で、**FAISS を
   実験側は `exp****` ロガーにしかハンドラを付けないので、索引構築の進捗ログ
   (「added X/Y slides」等)が experiment.log に出ない(0018 でも同様)。
 
+## experiments/0026: 収縮白色化の α スイープ(2026-09-10、job 10557)
+
+0025 の「難所見改善 vs atlas/common所見悪化」のトレードオフを、固有値を平均へ α で
+内挿してから逆平方根を取る収縮白色化(α=0→baseline、α=1→0025 full whiten)で分離
+できないか検証。α ∈ {0.25, 0.5, 0.75} の3索引をベイク再構築して self_retrieval +
+atlas GT を測定(両端は 0025 の CSV を参照)。
+
+- **狙いは外れた**: self_retrieval の難所見改善と、0025 で悪化していた common 所見
+  (Change eosinophilic, Cellular infiltration)・atlas GT の悪化は、α=0.25 の時点で
+  すでに両方立ち上がる。α を下げても悪化だけ消える分離点は見つからなかった。
+- **結論**: 変換の「強さ」をグローバルな1本のノブ(α)で調整するアプローチはこれ以上
+  見込みが薄い。昇格は保留のまま。
+
+## experiments/0027: atlas GT 悪化の図版単位切り分け診断(2026-09-11、job 10586)
+
+0025 の whiten 索引が atlas GT(7カテゴリ)を悪化させた原因を、カテゴリ単位の
+集計(`validate_against_ground_truth.py` は1カテゴリの全図版タイルを1回のマルチ
+タイルクエリに束ねる)では切り分けられなかったため、`scripts/atlas_per_image_diagnostic.py`
+で atlas 図版1枚ずつ個別にクエリし、baseline(0018)/ whiten(0025 full whiten)の
+best_rank を比較(索引再構築なし、既存索引をそのまま使用)。
+
+- **degradation は少数の外れ値図版ではなく、所見(finding)によっては図版全体に
+  一様に広がっている**:
+
+  | finding | 図版数 | 悪化した図版 | 傾向 |
+  |---|---|---|---|
+  | Single cell necrosis | 10 | 9/10 | ほぼ全図版が一様に悪化(+18〜+211) |
+  | Hematopoiesis, extramedullary | 4 | 4/4 | **全図版**が一様に悪化(+40〜+108) |
+  | Hypertrophy | 7 | 2/7 | 逆にほとんどの図版で改善(-4〜-60) |
+  | Inclusion body, intracytoplasmic | 2 | 0/2 | 両方とも大きく改善(-127, -156) |
+  | Deposit, glycogen | 4 | 2/4 | ほぼ拮抗(1図版は baseline 未検出GTを新規発見) |
+
+  atlas GT 悪化の主犯として 0025 で名指しされた2カテゴリ(Necrosis,
+  Hematopoiesis extramedullary)は、そのカテゴリの図版のほぼ全部/全部が同じ方向に
+  悪化しており、1〜2枚の外れ値図版が平均を引きずり下げているのではない。逆に
+  Hypertrophy / Inclusion body は図版レベルでもほぼ一貫して改善している。
+- **解釈**: 外れ値仮説は棄却され、構造的なドメインギャップ仮説を支持する結果。
+  ただし「atlas クエリ全般 vs コーパス」という一枚岩のギャップではなく、**所見
+  ごとに白色化との相性が系統的に違う**——Necrosis / Hematopoiesis extramedullary
+  の atlas 図版群は、白色化が増幅する小固有値方向とズレの方向が重なって悪化する
+  一方、Hypertrophy / Inclusion body は逆に恩恵を受けている、という構図。
+- **次**: Necrosis/Hematopoiesis(悪化側)と Hypertrophy/Inclusion body(改善側)の
+  間で何が違うのかを見て、所見ごとに変換を出し分ける(または悪化する所見だけ変換を
+  無効化する)方向が有望。
+
 ## 次の一手(成果物トラック)
 
 1. **glycogen deliver の137枚(job 9701)を病理知識のある人にレビューしてもらう** —
