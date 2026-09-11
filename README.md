@@ -1678,6 +1678,79 @@ infiltration↔Inflammation, Vacuolization cytoplasmic↔Fatty Change)はある�
 - **結果**: 修正後、全8 GT検証済み所見で「選んだ側の median best_rank が選ばなかった
   側以下」であることを確認(`outputs/0028_.../default/summary.md`)。
 
+## experiments/0029: アトラスデモへの所見ルーティング適用(2026-09-11、job 10595)
+
+`lib/finding_routing.py`(所見ラベル→索引の出し分け)を、NNL アトラス全25所見の
+検索デモに実際に適用した新規実験(`experiments/0020` は背景除去A/Bのまま変更せず)。
+所見ごとに baseline(0018)と routed(該当すれば whiten)を並べて検索し、実解像度
+パッチギャラリーを含む report.html を生成。25所見中3所見(Hypertrophy /
+Proliferation, Kupffer cell / Inclusion body, intracytoplasmic)だけ routed 列が
+whiten に切り替わり、残り22所見は baseline のまま(想定通り)。
+
+## experiments/0030: whiten ルーティング先3所見の目視診断(2026-09-11、job 10598)
+
+`experiments/0013`(タイルスコアヒートマップ + 実解像度パッチギャラリーで、
+GT best_rank だけでは見えない「返ってきたパッチが所見らしく見えるか」「タイル
+選択バイアス」を目視する枠組み)を、0025-0029 のルーティング作業で初めて適用。
+whiten に倒れた3所見(atlas 図版計10枚)を baseline/routed 両方で目視した。
+
+- **Cytoplasmic Inclusions**: 良好。クエリ図版は「丸い好酸性〜淡明な封入体が
+  画像全体に広がる」whole-patchテクスチャ型の所見で、routed側のパッチも同様の
+  丸い空胞・淡明領域を伴うテクスチャを示し、視覚的に妥当。baseline側はギャラリー
+  すら1枚も生成されなかった(上位ランクのスライドがexact-rerankプールに一度も
+  入らなかった)— むしろ baseline の弱さを裏付ける。
+- **Hypertrophy**: 明確な肥大所見は見えないが、これは既知の限界(相対的判断を
+  要する所見は単一パッチでは基準がない、README「所見の4クラス分け」参照)と
+  整合的で、新たな懸念ではない。
+- **⚠️ Proliferation, Kupffer cell**: 懸念あり。クエリ図版は**局所的**な所見
+  (画像の大部分は平凡な肝細胞組織、中央付近に小さなクッパー細胞集塊が1箇所のみ)。
+  baseline/routed 両方とも、返ってきたパッチはクッパー細胞集塊が視覚的に
+  はっきり写っているとは言えない平凡な組織だった。スライド単位のbest_rankは
+  改善していても、パッチ単位では所見が見える保証がないことが分かった。この所見は
+  コーパス内GTがわずか2枚・atlas図版も1枚とルーティングの根拠自体が薄く、
+  whitenへの昇格は再検討の余地がある(未決定、次の一手参照)。
+
+## experiments/0031: Fatty Change の Macenko vs プレーン 目視診断(2026-09-11、jobs 10599/10600)
+
+Fatty Change はコーパス内GTスライドが0枚で、7カテゴリGT検証にも今回のwhiten
+routingにも一度も入っていなかった(定量評価の手段が無い)。ユーザーが
+「experiments/0013 では Fatty Change の検索が良く見えたが 0029 のレポートでは
+そうでもない」と指摘 — 調べると **0013 は Macenko染色正規化コーパス(0012)+
+per-tile正規化クエリを使っていたのに対し、0029 は Fatty Change を whiten
+ルーティング対象に含んでおらず baseline(染色正規化なし)のままだった**ことが
+原因と判明(別パイプラインを比較していた)。
+
+- **既存データの再確認**: `outputs/gt_validations/gt_validation_v1_macenko_per_tile.csv`
+  (7カテゴリGT、baseline_v1 vs v1_macenko、以前から存在)を見ると、Macenko染色
+  正規化も集計では baseline_v1 に勝てず棚上げされていたが、**所見ごとには
+  明確に勝敗が分かれていた**:
+
+  | finding | baseline best | macenko(per_tile) best | 傾向 |
+  |---|---|---|---|
+  | Hypertrophy | 49 | **14** | macenko有利 |
+  | Increased mitosis | 7 | **1** | macenko有利 |
+  | Inclusion body, intracytoplasmic | 480 | **97** | macenko有利 |
+  | Single cell necrosis | 10 | 77 | baseline有利 |
+  | Deposit, glycogen | 7 | 14 | baseline有利 |
+  | Hematopoiesis, extramedullary | 25 | 84 | baseline有利 |
+  | Proliferation, Kupffer cell | 202 | 766 | baseline有利(大差) |
+
+  whitening と同じ「集計では勝てないが所見ごとには系統的な勝敗がある」構図。
+- **Fatty Change の目視結果**(GT無いため目視のみ、`experiments/0031`): macenko側の
+  パッチ(スライド33368、sim 0.69〜0.70)は、クエリ図版(丸い透明な脂肪空胞が
+  肝細胞全体に広がる典型的な脂肪変性像)と同様の**丸い空胞テクスチャ**を示し、
+  視覚的に妥当な一致だった。baseline側はギャラリーが2回(通常・全タイル厳密
+  re-rank後)とも空 — n_hits_ratio 上位スライドと厳密類似度上位200件プールが
+  全く重ならなかった(top5スライドが baseline/macenko で完全に別集合)。
+- **⚠️ 未解決の設計課題**: Macenko索引(0012)は背景除去前(0002相当のハイパラ)
+  で構築されており、**現行のbaseline(0018、背景除去済み)と同一コーパス世代
+  ではない**。また GT比較で macenko 有利と出た所見のうち **Hypertrophy と
+  Inclusion body は whiten でも有利**と出ており、baseline/whiten/macenko の
+  三択が必要になった所見が2つ生じている(現状はどちらを取るか未決定)。
+  `lib.finding_routing` を3択に拡張する前に、(a) macenko索引を背景除去済み
+  コーパスで作り直すか、(b) この2所見はどちらのGT改善幅が大きいかで機械的に
+  決めるか、方針を確認してから実装する。
+
 ## 次の一手(成果物トラック)
 
 1. **glycogen deliver の137枚(job 9701)を病理知識のある人にレビューしてもらう** —
