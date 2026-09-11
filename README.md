@@ -1635,23 +1635,48 @@ best_rank を比較(索引再構築なし、既存索引をそのまま使用)�
 ルーティングの結論も変わる** —— 索引の出し分けは atlas フォルダ単位ではなく
 finding_type 単位で行うべきという設計上の含意。
 
-### 所見ごとのルーティング表(GT実測ベース、確定)
+### 所見ごとのルーティング表(GT実測ベース、0028で最終確定)
 
 | finding | 根拠 | ルーティング |
 |---|---|---|
-| Hypertrophy | 7枚中5枚改善(net改善) | **whiten** |
-| Necrosis | 10枚中6枚改善、net -282 | **whiten** |
-| Deposit, glycogen | 拮抗+新規GT発見1件 | **whiten** |
-| Proliferation, Kupffer cell | 改善(-6) | **whiten** |
-| Inclusion body, intracytoplasmic | 2枚とも大幅改善 | **whiten** |
-| Single cell necrosis | 10枚中9枚悪化 | **baseline** |
-| Hematopoiesis, extramedullary | 4枚とも悪化 | **baseline** |
+| Hypertrophy | 7枚中5枚改善(net改善)、median best_rank 16→13 | **whiten** |
+| Necrosis | 10枚中6枚改善、median best_rank 136→115.5 | **whiten** |
+| Proliferation, Kupffer cell | median best_rank 78→72 | **whiten** |
+| Inclusion body, intracytoplasmic | 2枚とも大幅改善、median best_rank 481.5→340 | **whiten** |
+| Single cell necrosis | 10枚中9枚悪化、median best_rank 29→104 | **baseline** |
+| Hematopoiesis, extramedullary | 4枚とも悪化、median best_rank 42.5→103 | **baseline** |
 | Increased mitosis | 唯一の図版(n=1)が悪化 | **baseline**(サンプル数少なくatlas実測を優先) |
+| Deposit, glycogen | found(検出数)は whiten が優位(16→24)だが、median best_rank は大幅悪化(10→79) | **baseline**(0028で修正、下記参照) |
 | 上記以外(atlas GT未検証、約9所見) | 実測なし | **baseline**(保守方針。悪化しないと確認できるまでは whiten を使わない) |
 
 未検証の所見のうち、ドメイン的に atlas カテゴリと対応しうる候補(Cellular
 infiltration↔Inflammation, Vacuolization cytoplasmic↔Fatty Change)はあるが、
 ラベルの医学的妥当性が未確認のため今回は保留。
+
+## experiments/0028: 所見ごとの索引ルーティング実装 + 検証(2026-09-11、ローカル実行)
+
+`lib/finding_routing.py` を実装:所見ラベル(finding_type)を受け取り、対応する
+索引ディレクトリ(baseline=0018 / whiten=0025 whiten_v1)を返す
+`index_dir_for_finding()`。ルーティング表は `WHITEN_FINDINGS` に定数として持つ。
+検証は新規計算なしで experiments/0025(self_retrieval)/ 0027(atlas 図版単位)の
+既存 CSV を再集計するだけなので GPU 不要、capsule 内でローカル実行(Slurm 投入なし)。
+
+- **self_retrieval**: routed は whiten に倒した4所見(Hypertrophy, Necrosis,
+  Proliferation Kupffer cell, Inclusion body)だけ whiten の値を採用、残りは
+  baseline のまま = 悪化した所見(Change eosinophilic, Cellular infiltration 等)
+  は一切触れずに難所見(Hypertrophy, Necrosis, granular 系)の改善だけ享受する形。
+- **atlas GT の再検証で Deposit, glycogen のルーティングを修正**: found(検出数)
+  だけを見ると whiten が優位(16→24)だったため 0027 では whiten 寄りと判断したが、
+  この repo の主指標である **median best_rank で見ると whiten は大幅悪化
+  (10→79)** だった。found と best_rank が逆方向を指すケースがあることが分かり、
+  glycogen は baseline に修正。それ以外の所見は found と best_rank が同じ方向を
+  指しており判断は変わらなかった。
+- **教訓**: 「routed の値が baseline/whiten のどちらかをそのまま採用する」構造だと
+  「routed が両方より悪化していないか」というチェックは定義上必ず true になり
+  無意味(最初の実装のミス)。意味があるのは「選んだ側が選ばなかった側より
+  本当に良いか」を所見ごとに直接比較すること。
+- **結果**: 修正後、全8 GT検証済み所見で「選んだ側の median best_rank が選ばなかった
+  側以下」であることを確認(`outputs/0028_.../default/summary.md`)。
 
 ## 次の一手(成果物トラック)
 

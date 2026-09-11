@@ -1,0 +1,12 @@
+# ============================================================
+# experiments/0028: lib.finding_routing の検証(既存CSVの再集計のみ)
+# ============================================================
+# lib/finding_routing.py で確定させた所見ごとのルーティング表(baseline/whiten)が、
+# self_retrieval(0025)と atlas GT(0027)の両方で「良いとこ取り」になっているかを
+# 確認する。新規の索引構築・クエリ埋め込みは行わない — 既存の CSV を
+# WHITEN_FINDINGS で再集計するだけなので GPU 不要、この capsule 内でローカル実行できる。
+# ============================================================
+
+self_retrieval_baseline: "outputs/0025_20260910_whiten_index_rebuild/default/self_retrieval_baseline.csv"
+self_retrieval_whiten: "outputs/0025_20260910_whiten_index_rebuild/default/self_retrieval_whiten.csv"
+atlas_per_image: "outputs/0027_20260911_atlas_outlier_diagnostic/default/atlas_per_image.csv"
