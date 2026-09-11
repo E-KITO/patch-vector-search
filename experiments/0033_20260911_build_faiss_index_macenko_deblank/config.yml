@@ -1,0 +1,17 @@
+# ============================================================
+# Experiment Configuration
+# ============================================================
+# 0033: experiments/0012(Macenko索引)を、背景除去済みmanifest(experiments/
+# 0032)で作り直したもの。ハイパラは0012/0018と完全一致 — 変わるのは
+# manifest_exp_dir(背景除去の有無)のみ。
+# ============================================================
+
+seed: 42
+features_dir: "data/trident_processed_uni_v1_macenko/20x_224px_0px_overlap/features_uni_v1_macenko"
+manifest_exp_dir: "outputs/0032_20260911_build_patch_manifest_macenko_deblank/default"
+
+# 0012/0018 と同一値。
+nlist: 4096
+pq_m: 64
+pq_nbits: 8
+opq_niter: 10
