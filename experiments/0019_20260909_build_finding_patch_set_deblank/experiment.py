@@ -163,11 +163,14 @@ def main() -> None:
 
     rng = np.random.default_rng(seed)
 
-    # lib.finding_routing: 所見ラベルごとに baseline/whiten 索引を出し分ける
-    # (README「所見ごとのルーティング表」参照)。現状の SUPPORTED_FINDINGS は
-    # いずれも whiten 対象外なので、このリストが変わらない限り baseline と
-    # 同じ結果になる。
-    pi = load_index_for_finding(args.finding, features_dir)
+    # lib.finding_routing: 所見ラベルごとに baseline/whiten/macenko 索引を出し
+    # 分ける(README「所見ごとのルーティング表」参照)。現状の SUPPORTED_FINDINGS
+    # はいずれも whiten/macenko 対象外なので、このリストが変わらない限り
+    # baseline と同じ結果になる。macenko ルーティング対象の所見をこのトラックに
+    # 追加する場合、クエリも corpus 自身のスライドから直接 h5 を読む方式なので
+    # features_dir を MACENKO_FEATURES_DIR に切り替える対応が別途必要になる
+    # (lib.finding_routing.load_index_for_finding のdocstring参照、現状未対応)。
+    pi = load_index_for_finding(args.finding)
     corpus_slides = set(pi.slide_meta.index.astype(str))
 
     gt = pd.read_csv(gt_csv)
