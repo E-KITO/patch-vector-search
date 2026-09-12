@@ -1,5 +1,9 @@
 """所見ラベルに対する One-vs-Rest 線形分類器で、クエリタイルを「その所見らしいか」で
-再スコアする(experiments/0035)。
+再スコアする(experiments/0035、複数所見での再試行はexperiments/0036)。
+
+分類器の学習・batch-confound検証に加えて、atlas図版のタイル分割・埋め込み・スコア
+ヒートマップ描画・検索腕(unfiltered/ovr_filtered)の実行という、この手法をどの所見に
+適用する場合でも共通する処理一式もここに置く(experiments/0035と0036の重複を避ける)。
 
 背景(README「検索結果の可視化改善とタイル選択バイアスの発見」): lib.search.PatchIndex
 の近似FAISSスコアは「コーパス内で最近傍が何か」を測るため、コーパスにありふれた正常
@@ -133,6 +137,260 @@ def train_logreg(pos_vecs: np.ndarray, neg_vecs: np.ndarray, C: float, seed: int
     clf = LogisticRegression(C=C, class_weight="balanced", max_iter=2000, random_state=seed)
     clf.fit(X, y)
     return clf
+
+
+def resolve_atlas_images(project_root: Path, config: dict, target_finding: str) -> list[str]:
+    """target_finding にマッピングされる atlas 図版フォルダの画像パスをすべて返す
+    (scripts.validate_against_ground_truth.CATEGORIES 経由の解決、experiments/0034
+    と同じ)。CATEGORIES に対応フォルダが無い所見は空リストを返す(呼び出し側で
+    スキップすること)。"""
+    import sys
+
+    sys.path.insert(0, str(project_root))
+    from lib.atlas_figures import query_images
+    from scripts.validate_against_ground_truth import CATEGORIES
+
+    atlas_root = project_root / config["atlas_root"]
+    atlas_csv = project_root / config["atlas_figures_csv"]
+
+    images: list[str] = []
+    for folder_name, finding_type in CATEGORIES.items():
+        if finding_type != target_finding:
+            continue
+        cat_dir = atlas_root / folder_name
+        images.extend(str(p) for p in query_images(cat_dir, atlas_csv=atlas_csv))
+    return images
+
+
+def tile_grid_crops(pil_image, tile_size: int, crop_size: int):
+    """lib.query_embedding.embed_image_tiles / lib.visualize.plot_query_tile_scores
+    と同一のグリッド分割・空白タイル除外ロジック(タイル原点座標付きで返す必要が
+    あるため、plot_query_tile_scores と同じ理由で複製する——そちらのdocstring参照)。
+
+    Returns:
+        (pil_image(拡大後), kept_origins, kept_crops, n_blank_excluded)
+    """
+    from lib.query_embedding import _is_blank_tile
+    from PIL import Image
+
+    w, h = pil_image.size
+    scale = max(crop_size / w, crop_size / h, 1.0)
+    if scale > 1.0:
+        pil_image = pil_image.resize(
+            (max(crop_size, round(w * scale)), max(crop_size, round(h * scale))), Image.LANCZOS
+        )
+        w, h = pil_image.size
+
+    xs = sorted(set(list(range(0, w - crop_size + 1, crop_size)) + [w - crop_size]))
+    ys = sorted(set(list(range(0, h - crop_size + 1, crop_size)) + [h - crop_size]))
+    origins = [(x, y) for y in ys for x in xs]
+    crops = [pil_image.crop((x, y, x + crop_size, y + crop_size)) for x, y in origins]
+
+    blank = [_is_blank_tile(c) for c in crops]
+    if all(blank):
+        blank = [False] * len(blank)
+
+    kept_origins = [o for o, b in zip(origins, blank) if not b]
+    kept_crops = [c for c, b in zip(crops, blank) if not b]
+    if crop_size != tile_size:
+        kept_crops = [c.resize((tile_size, tile_size), Image.LANCZOS) for c in kept_crops]
+    return pil_image, kept_origins, kept_crops, sum(blank)
+
+
+def embed_tile_crops(crops, tile_size: int) -> np.ndarray:
+    """タイル(PIL Image)のリストをUNIエンコーダ(uni_v1)で埋め込む
+    (lib.query_embedding.embed_image_tiles と同じ前処理・同じエンコーダキャッシュ)。"""
+    import torch
+    from torchvision import transforms
+    from lib.query_embedding import _load_encoder, _normalize_rows
+
+    encoder, device, dtype = _load_encoder(None)
+    to_tensor = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+    ])
+    batch = torch.stack([to_tensor(c) for c in crops]).to(device=device, dtype=dtype)
+    with torch.no_grad():
+        embeddings = encoder(batch).float().cpu().numpy().astype(np.float32)
+    return _normalize_rows(embeddings)
+
+
+def plot_classifier_tile_heatmap(image_path: str, origins, scores: np.ndarray, tile_size: int):
+    """OvR分類器のdecision_functionスコアを、lib.visualize.plot_query_tile_scores と
+    同じ見た目(元画像にタイルごとの半透明カラーオーバーレイ+カラーバー)で可視化する。"""
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as mpatches
+    from matplotlib.colors import Normalize
+    from lib.query_embedding import _load_rgb
+
+    pil_image = _load_rgb(image_path)
+    w, h = pil_image.size
+    scale = max(tile_size / w, tile_size / h, 1.0)
+    if scale > 1.0:
+        from PIL import Image
+        pil_image = pil_image.resize((max(tile_size, round(w * scale)), max(tile_size, round(h * scale))), Image.LANCZOS)
+        w, h = pil_image.size
+
+    cmap = plt.get_cmap("magma")
+    norm = Normalize(vmin=float(scores.min()), vmax=float(scores.max()))
+
+    fig, ax = plt.subplots(figsize=(w / 100, h / 100))
+    ax.imshow(pil_image)
+    for (x, y), score in zip(origins, scores):
+        ax.add_patch(mpatches.Rectangle(
+            (x, y), tile_size, tile_size, facecolor=cmap(norm(score)), alpha=0.5, edgecolor="none",
+        ))
+    sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
+    sm.set_array([])
+    fig.colorbar(sm, ax=ax, label="OvR classifier decision_function score", shrink=0.7)
+    ax.set_title("Per-tile OvR classifier score (higher = more finding-like)", fontsize=9)
+    ax.set_xlim(0, w)
+    ax.set_ylim(h, 0)
+    ax.axis("off")
+    fig.tight_layout()
+    return fig
+
+
+def run_query_arm(
+    *, arm_label: str, query_vecs: np.ndarray, patch_index, thumbnails_dir: Path,
+    run_dir: Path, params: dict, logger,
+) -> dict:
+    """1つの腕(unfiltered / ovr_filtered)について検索・可視化を実行する
+    (experiments/0034 の process_query_set と同じ構造)。"""
+    from lib.visualize import plot_hit_patch_gallery, plot_slide_hits_on_thumbnail
+    import matplotlib.pyplot as plt
+
+    arm_dir = run_dir / f"query__{arm_label}"
+    arm_dir.mkdir(exist_ok=True)
+    gallery_dir = arm_dir / "patch_gallery"
+    gallery_dir.mkdir(exist_ok=True)
+    plots_dir = arm_dir / "thumbnail_plots"
+    plots_dir.mkdir(exist_ok=True)
+
+    top_slides = patch_index.search_top_slides_multi(
+        query_vecs, k_candidates=params["k_candidates"], nprobe=params["nprobe"],
+        top_n_slides=params["top_n_slides"],
+    )
+    top_slides.to_csv(arm_dir / "top_slides.csv", index=False)
+    logger.info(f"[{arm_label}] top slides:\n{top_slides}")
+
+    hit_pool = patch_index.search_similar_patches_multi(
+        query_vecs, k=params["rerank_pool"], nprobe=params["nprobe"],
+        rerank_pool=params["rerank_pool"], max_tiles_reranked=params["max_tiles_reranked"],
+    )
+    n_gal = 0
+    for slide_id in top_slides["slide_id"].head(params["top_n_slides_to_plot"]):
+        hits = hit_pool[hit_pool["slide_id"] == slide_id]
+        if hits.empty:
+            continue
+        try:
+            fig = plot_slide_hits_on_thumbnail(slide_id, hits, thumbnails_dir, patch_index.slide_meta)
+            fig.savefig(plots_dir / f"{slide_id}.png", dpi=150)
+            plt.close(fig)
+        except Exception as e:
+            logger.warning(f"[{arm_label}] thumbnail plot failed for slide {slide_id}: {e!r}")
+        try:
+            fig = plot_hit_patch_gallery(hits, params["raw_slide_dir"], patch_index.slide_meta)
+            fig.savefig(gallery_dir / f"{slide_id}.png", dpi=150)
+            plt.close(fig)
+            n_gal += 1
+        except Exception as e:
+            logger.warning(f"[{arm_label}] gallery failed for slide {slide_id}: {e!r}")
+    logger.info(f"[{arm_label}] galleries written: {n_gal}")
+    return {
+        "n_tiles": int(query_vecs.shape[0]),
+        "n_top_slides": int(len(top_slides)),
+        "top_slide_ids": top_slides["slide_id"].astype(str).tolist(),
+        "n_galleries": n_gal,
+    }
+
+
+def train_and_evaluate_classifier(project_root, config: dict, manifest, target_finding: str, logger):
+    """GT正例 vs コーパス全体ランダム負例で分類器を学習し、study単位LOSO AUROCで
+    「所見」と「化合物・studyというバッチ」のどちらを学習しているかを確認する。
+
+    manifest は呼び出し側で slide_id を str にキャストしたコピーを渡すこと
+    (patch_index.manifest 本体は検索側の他メソッドが使うため——experiments/0035の
+    main() 参照)。target_finding を config から読まず明示引数にしているのは、
+    experiments/0036 のように同じ config で複数所見を順に処理する呼び出し元が
+    あるため。
+
+    GT正例スライドが1件も無い場合は空のdiagnosticsを返す(raiseしない——
+    experiments/0036 のような複数所見スイープが1所見の欠測で全体停止しないため。
+    呼び出し側は diagnostics["n_positive_slides"] == 0 で判定すること)。
+
+    Returns:
+        (final_classifier | None, loso_df | None, diagnostics: dict)
+    """
+    rng = np.random.default_rng(config.get("seed", 42))
+    features_dir = project_root / config["features_dir"]
+
+    corpus_slides = set(manifest["slide_id"].astype(str).unique())
+    gt = load_gt_slides_for_finding(target_finding, corpus_slides, project_root / config["gt_csv"])
+    if gt.empty:
+        logger.warning(f"no corpus GT slides found for finding_type={target_finding!r} — skipping")
+        return None, None, {"target_finding": target_finding, "n_positive_slides": 0}
+    logger.info(f"GT slides for {target_finding!r}: {len(gt)} "
+                f"(n_compounds={gt['COMPOUND_NAME'].nunique()}, n_exp_ids={gt['EXP_ID'].nunique()})")
+
+    pos_vecs, pos_slide_ids = sample_patch_vectors(
+        gt["slide_id"].tolist(), manifest, features_dir,
+        max_per_slide=config["max_positive_patches_per_slide"], rng=rng,
+    )
+    logger.info(f"positive patches sampled: {pos_vecs.shape[0]} from {gt['slide_id'].nunique()} slides")
+
+    neg_vecs, neg_slide_ids = sample_negative_pool(
+        manifest, features_dir, n=config["n_negative_patches"],
+        exclude_slides=set(gt["slide_id"]), rng=rng,
+    )
+    logger.info(f"negative patches sampled: {neg_vecs.shape[0]} from {len(set(neg_slide_ids))} slides")
+
+    # 負例をLOSO専用のtrain/testに一度だけ分割(train/test漏洩を避けるため全フォールドで
+    # 使い回す。loso_auroc_by_study のdocstring参照)。
+    perm = rng.permutation(len(neg_vecs))
+    n_test = int(round(len(neg_vecs) * config["neg_test_fraction"]))
+    neg_test_vecs = neg_vecs[perm[:n_test]]
+    neg_train_vecs = neg_vecs[perm[n_test:]]
+
+    exp_id_of = dict(zip(gt["slide_id"], gt["EXP_ID"].astype(str)))
+    n_exp_ids = gt["EXP_ID"].nunique()
+    if n_exp_ids >= 2:
+        loso_df = loso_auroc_by_study(
+            pos_vecs, pos_slide_ids, exp_id_of, neg_train_vecs, neg_test_vecs,
+            C=config["classifier_C"], seed=config.get("seed", 42),
+        )
+        if len(loso_df):
+            logger.info(f"LOSO AUROC (median={loso_df['auroc'].median():.3f}, "
+                        f"min={loso_df['auroc'].min():.3f}, max={loso_df['auroc'].max():.3f}, "
+                        f"n_folds={len(loso_df)}):\n{loso_df}")
+        else:
+            logger.warning("LOSO produced 0 usable folds (every study had all-or-nothing positives)")
+    else:
+        loso_df = None
+        logger.warning(
+            f"only {n_exp_ids} distinct EXP_ID among {target_finding!r} GT slides — "
+            "cannot leave-one-study-out; AUROC would be indistinguishable from "
+            "memorizing that single study (see README self_retrieval_diagnostic "
+            "n_exp_ids caveat). Skipping LOSO."
+        )
+
+    final_clf = train_logreg(pos_vecs, np.concatenate([neg_train_vecs, neg_test_vecs]),
+                              C=config["classifier_C"], seed=config.get("seed", 42))
+
+    diagnostics = {
+        "target_finding": target_finding,
+        "n_positive_patches": int(pos_vecs.shape[0]),
+        "n_positive_slides": int(gt["slide_id"].nunique()),
+        "n_compounds": int(gt["COMPOUND_NAME"].nunique()),
+        "n_exp_ids": int(n_exp_ids),
+        "n_negative_patches": int(neg_vecs.shape[0]),
+        "n_negative_slides": int(len(set(neg_slide_ids))),
+        "loso_median_auroc": float(loso_df["auroc"].median()) if loso_df is not None and len(loso_df) else None,
+        "loso_min_auroc": float(loso_df["auroc"].min()) if loso_df is not None and len(loso_df) else None,
+        "loso_max_auroc": float(loso_df["auroc"].max()) if loso_df is not None and len(loso_df) else None,
+        "loso_n_folds": int(len(loso_df)) if loso_df is not None else 0,
+    }
+    return final_clf, loso_df, diagnostics
 
 
 def loso_auroc_by_study(
