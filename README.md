@@ -1742,14 +1742,51 @@ per-tile正規化クエリを使っていたのに対し、0029 は Fatty Change
   視覚的に妥当な一致だった。baseline側はギャラリーが2回(通常・全タイル厳密
   re-rank後)とも空 — n_hits_ratio 上位スライドと厳密類似度上位200件プールが
   全く重ならなかった(top5スライドが baseline/macenko で完全に別集合)。
-- **⚠️ 未解決の設計課題**: Macenko索引(0012)は背景除去前(0002相当のハイパラ)
-  で構築されており、**現行のbaseline(0018、背景除去済み)と同一コーパス世代
-  ではない**。また GT比較で macenko 有利と出た所見のうち **Hypertrophy と
-  Inclusion body は whiten でも有利**と出ており、baseline/whiten/macenko の
-  三択が必要になった所見が2つ生じている(現状はどちらを取るか未決定)。
-  `lib.finding_routing` を3択に拡張する前に、(a) macenko索引を背景除去済み
-  コーパスで作り直すか、(b) この2所見はどちらのGT改善幅が大きいかで機械的に
-  決めるか、方針を確認してから実装する。
+- **⚠️ 未解決の設計課題 → 解消**: Macenko索引(0012)は背景除去前(0002相当の
+  ハイパラ)で構築されており、現行のbaseline(0018、背景除去済み)と同一コーパス
+  世代ではなかった。また GT比較で macenko 有利と出た所見のうち Hypertrophy と
+  Inclusion body は whiten でも有利と出ており、baseline/whiten/macenko の
+  三択が必要になった所見が2つ生じていた。ユーザー確認の上で両方とも解決:
+
+## experiments/0032・0033: 背景除去済みMacenko索引の再構築(2026-09-11〜12、jobs 10603/10604)
+
+experiments/0032: experiments/0017 と同じ背景除去ロジック(corpus_blankness.parquet、
+sat_frac<0.10)を Macenko manifest(experiments/0010)に適用。**発見: Macenko
+コーパスは独立した wsi_preprocess 抽出のため、1000スライド中12枚でタイリング
+境界の非決定性によるパッチ数のわずかなズレ(数パッチ)があり、plain コーパスの
+blankness 除外リストをそのまま当てると exclusion 行が範囲外になって
+fail-fast した**(job 10601、`lib.manifest.build_patch_manifest` の意図通りの
+安全装置)。local_idx が1件でもズレると以降の対応が総崩れになるため、除外
+リストを補正して当てはめるのではなく、**該当12スライドだけ背景除去をスキップ**
+(全パッチ保持)する方針で修正(`_adjust_blankness_for_corpus`)。最終的に
+17,981,963パッチ(背景386,372枚=2.1%除外、0018とほぼ同水準)。
+
+experiments/0033: 0032の出力から、0012/0018と完全同一のFAISSハイパラ
+(nlist=4096, pq_m=64, pq_nbits=8, opq_niter=10)で索引を再構築。
+
+Hypertrophy/Inclusion body の三択は、GT改善幅がより大きい macenko を採用
+(Hypertrophy: whiten median best_rank 16→13 vs macenko 49→14。Inclusion body:
+whiten 481.5→340 vs macenko 480→97)。`lib/finding_routing.py` を baseline/
+whiten/macenko の3択に拡張:
+
+| finding | ルーティング | 根拠 |
+|---|---|---|
+| Hypertrophy | **macenko** | GT改善幅大(49→14) |
+| Increased mitosis | **macenko** | GT改善(7→1)、whitenとの競合なし |
+| Inclusion body, intracytoplasmic | **macenko** | GT改善幅大(480→97) |
+| Degeneration, fatty | **macenko** | GTなし、experiments/0031の目視診断で妥当性確認 |
+| Necrosis | whiten | 変更なし |
+| Proliferation, Kupffer cell | whiten | 変更なし(0030で懸念あり、次の一手参照) |
+| 上記以外 | baseline | 保守方針(実測なし/macenko・whitenとも不利) |
+
+macenko ルーティング所見はコーパス自体が別 h5 特徴量群(`MACENKO_FEATURES_DIR`)
+なので、クエリ画像も `query_tile_transform_for_finding` で per-tile Macenko
+正規化してから埋め込む必要がある(`lib/finding_routing.py` 参照)。
+
+**未解決のまま残っている件**: `Proliferation, Kupffer cell` は whiten ルーティング
+のままだが、experiments/0030 の目視診断で「パッチ単位では所見が視覚的に見えて
+いない」懸念が出ており、GT根拠も薄い(コーパス内GT2枚・atlas図版1枚)。baseline
+に戻すかどうかは未決定。
 
 ## 次の一手(成果物トラック)
 
