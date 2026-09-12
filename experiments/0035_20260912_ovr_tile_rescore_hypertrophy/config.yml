@@ -1,0 +1,50 @@
+# ============================================================
+# experiments/0035: OvR(One-vs-Rest)線形分類器によるタイル事前重み付けの
+# プローブ(対象所見: Hypertrophy)
+# ============================================================
+# README「検索結果の可視化改善とタイル選択バイアスの発見」で確認された、近似FAISS
+# スコアがコーパス内の出現頻度に引っ張られるバイアス(ありふれた正常組織のタイルが
+# 珍しい所見のタイルより高スコアになる)を、GT正例(所見スライド)vsコーパス全体
+# ランダム負例で学習した軽量ロジスティック回帰でどこまで避けられるかを確認する。
+#
+# Hypertrophy を選んだ理由: (1) コーパス内GTが25枚と本プロジェクトで最も潤沢、
+# (2) experiments/0034 で baseline/macenko 両方ともパッチギャラリーが0枚になり、
+# 「近似スコアでは所見タイルが選ばれていない」疑いが最も強い所見だったため。
+#
+# 索引は常に baseline(0018、無変換)を使う——ここで検証したいのは「タイルの
+# 事前フィルタが効くか」であって whiten/macenko 変換の効果ではないので、変換軸は
+# 固定して分離する。
+# ============================================================
+
+seed: 42
+
+target_finding: "Hypertrophy"
+gt_csv: "data/processed_csv/single_finding_liver.csv"
+
+index_dir: "outputs/0018_20260909_build_faiss_index_deblank/default"
+features_dir: "data/trident_processed/20x_224px_0px_overlap/features_uni_v1"
+
+# --- 分類器の学習データ ---
+max_positive_patches_per_slide: 300   # 1スライドが正例プールを埋め尽くさないためのキャップ
+n_negative_patches: 6000              # コーパス全体(正例スライド除く)からのランダム負例数
+neg_test_fraction: 0.2                # LOSO評価専用に取り置く負例の割合(学習には一切使わない)
+classifier_C: 1.0
+
+# --- タイル事前重み付け(本命の実験対象) ---
+# クエリ画像のタイルを分類器スコア上位 keep_frac の割合だけ残してから検索する。
+# 0(全除外)は無意味、1.0は「フィルタなし」(=unfiltered腕と同じ)になるので使わない。
+keep_frac: 0.3
+
+# --- atlas クエリ・検索パラメータ(experiments/0034と揃え、直接比較できるようにする) ---
+atlas_root: "data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver"
+atlas_figures_csv: "data/query/nnl_liver_atlas_figures.csv"
+raw_slide_dir: "data/moo_collected_tggate_wsi/raw_wsi"
+baseline_thumbnails_dir: "data/trident_processed/thumbnails"
+
+tile_size: 224
+nprobe: 32
+rerank_pool: 200
+max_tiles_reranked: null   # experiments/0031 job 10599 の教訓により全タイル厳密re-rank
+k_candidates: 8000
+top_n_slides: 20
+top_n_slides_to_plot: 3
