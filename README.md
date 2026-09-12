@@ -1843,6 +1843,78 @@ whiten 側 best_rank 16→13 も参照)。つまり0033で「GT改善幅がよ�
 構図の2例目であり、GT best_rank という指標だけでルーティングを決めることの
 限界を裏付ける。baseline に戻すかどうかも含め未決定(次の一手参照)。
 
+## experiments/0035: OvR分類器によるタイル事前重み付けプローブ(2026-09-12、job 10608)
+
+「検索結果の可視化改善とタイル選択バイアスの発見」で確認された、近似FAISSスコアが
+コーパス内の出現頻度に引っ張られる問題(ありふれた正常組織のタイルが珍しい所見の
+タイルより高スコアになる)に対する新しい対抗策の第一弾。GT正例(所見の確定
+スライドのパッチ)vsコーパス全体ランダム負例で軽量なOne-vs-Restロジスティック回帰
+(`lib/ovr_scoring.py`、UNI特徴量はそのまま流用・再学習は分類器のみ)を所見ごとに
+学習し、クエリタイルをこのスコアで事前フィルタしてから検索する
+(`unfiltered`=フィルタなし vs `ovr_filtered`=スコア上位30%のみ、索引は常に
+baseline 0018に固定)。対象はHypertrophy単体(コーパス内GT25枚と最多、かつ
+experiments/0034で最もタイル選択バイアスが疑われた所見)。
+
+- **study(EXP_ID)単位のleave-one-study-out(LOSO)交差検証**を導入し、分類器が
+  「所見」ではなく「化合物・studyというバッチ」を学習していないかを確認
+  (`scripts/self_retrieval_diagnostic.py`のbatch_dominates_finding_rateと同じ
+  発想)。1つのstudyを丸ごと除外して学習→そのstudyの正例で評価、を正例が属する
+  study数だけ繰り返す(=fold数)。
+- **結果: 否定的**。LOSO AUROC(14 fold)が median 0.660 ながら **0.102〜0.921と
+  fold間で激しくブレる**——分類器がHypertrophyという所見を安定して学習できて
+  いない(バッチを学習している疑いが強い)。
+- **タイル事前フィルタを掛けてもパッチギャラリーは`unfiltered`/`ovr_filtered`
+  両方とも0枚のまま**——0034で見えた「baseline/macenko両方ともギャラリー0枚」が
+  タイル選択の問題ではなく、Hypertrophyという所見自体がそもそも単一パッチ・
+  単一タイルに現れない(「所見の3クラス分け」の「相対的基準を要する所見」)、
+  というより根本的な限界だったことを示唆する結果。
+
+## experiments/0036: OvRタイル事前重み付けを複数所見で再試行(2026-09-12、job 10609)
+
+experiments/0035の否定的結果が「Hypertrophy固有の限界」なのか「OvR手法自体の
+限界」なのか、1所見だけでは切り分けられなかったため、atlas図版がある7所見
+(`scripts.validate_against_ground_truth.CATEGORIES`)全部に展開して再試行。
+0035の共通処理(分類器学習・タイル分割・埋め込み・ヒートマップ・検索腕)は
+`lib/ovr_scoring.py`に集約し、0035自体もそれを使うようリファクタ(挙動は不変)。
+1所見のGT不足・atlas図版欠如・想定外エラーが他所見を止めないよう所見ごとに
+try/exceptしてある。
+
+**結果: 所見によってはっきり明暗が分かれた——Hypertrophyだけが特別に悪かった。**
+
+| 所見 | LOSO AUROC(median、min〜max、fold数) | ギャラリー(unfiltered→ovr_filtered) |
+|---|---|---|
+| Deposit, glycogen | **0.960**(0.952〜0.972、4fold) | 1→2枚 |
+| Hematopoiesis, extramedullary | 0.912(0.716〜0.968、3fold) | 0→0枚 |
+| Single cell necrosis | 0.842(0.537〜0.919、3fold) | 0→1枚 |
+| Increased mitosis | 0.789(0.496〜0.909、7fold) | 2→3枚 |
+| **Hypertrophy** | 0.660(**0.102〜0.921**、14fold) | 0→0枚 |
+| Proliferation, Kupffer cell | LOSO不可(study1つのみ) | 2→3枚(参考程度) |
+| Inclusion body, intracytoplasmic | LOSO不可(study1つのみ) | 0→0枚 |
+
+- **Deposit, glycogenが最も安定して所見を学習できている**(4foldとも0.95台に
+  収まる、Hypertrophyのような極端なブレが無い)——ギャラリーも1→2枚に改善し、
+  タイル事前重み付けが狙った方向に効いた初めての実例。Increased mitosis /
+  Single cell necrosisも同様に、AUROCが安定している所見ではギャラリーが小さく
+  改善した。
+- **Hypertrophyだけが際立って不安定**(AUROCのfold間レンジが0.10〜0.92と他所見
+  より一桁広い)。他の所見はGT枚数が少なくても(Hematopoiesis 3枚など)LOSOが
+  比較的安定しており、「OvR手法自体がダメ」ではなく「Hypertrophyという所見が
+  特に難しい」という0035の解釈を裏付ける。
+- **⚠️ 注目すべき例外: Hematopoiesis, extramedullary はLOSO AUROC 0.912と高い
+  (=分類器はタイルを正しく識別できている)のに、ギャラリーは0→0枚のまま**。
+  これはexperiments/0013でper-tile Macenko正規化を使って**全く同じ所見**で
+  見つかった「タイル識別の改善はスライド検索に伝播しない」現象
+  (「発見2: ただしタイル識別の改善はスライド検索に伝播しない」)と同一で、
+  **手法を変えても(Macenko正規化→OvR分類器)全く同じ現象が再現した**。
+  ボトルネックはタイル選択ではなく、より下流(スライド集計 or コーパスに
+  その所見に近いパッチ自体が無い)にあることの、独立した手法による裏付け。
+- **結論**: OvRタイル事前重み付けは、GT実測が安定して取れる所見では小さいが
+  実在する改善を生む。ただし(a)Hypertrophyのように所見自体がパッチ単位で
+  識別不能な場合、(b)Hematopoiesisのようにタイル識別は改善してもスライド集計
+  が別のボトルネックになっている場合、のどちらにも効かない——タイル選択
+  バイアスは「アトラス→TG-GATEsのドメインギャップ」の一因ではあるが、
+  この2ケースが示す通り単独の主犯ではない。
+
 ## 次の一手(成果物トラック)
 
 1. **glycogen deliver の137枚(job 9701)を病理知識のある人にレビューしてもらう** —
