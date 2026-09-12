@@ -1788,6 +1788,61 @@ macenko ルーティング所見はコーパス自体が別 h5 特徴量群(`MAC
 いない」懸念が出ており、GT根拠も薄い(コーパス内GT2枚・atlas図版1枚)。baseline
 に戻すかどうかは未決定。
 
+## experiments/0034: macenko ルーティング先4所見の目視診断(2026-09-12、job 10606)
+
+experiments/0030(whiten ルーティング先の目視診断)の枠組みに experiments/0031
+(macenko の per-tile 染色正規化クエリ)を統合し、`lib.finding_routing.MACENKO_FINDINGS`
+の4所見(Hypertrophy / Increased mitosis / Inclusion body, intracytoplasmic /
+Degeneration, fatty、計18図版)を baseline(0018)と routed(macenko、0033=背景
+除去済み)の両方で目視診断した。全8変量が成功したが、パッチギャラリー生成数は
+所見によって偏りが大きい:
+
+| 所見 | baseline gallery | routed(macenko) gallery |
+|---|---|---|
+| Hypertrophy | 0枚 | **0枚** |
+| Increased mitosis | 2枚 | 3枚 |
+| Inclusion body, intracytoplasmic(Cytoplasmic Inclusions) | 0枚 | 2枚 |
+| Degeneration, fatty(Fatty Change) | 0枚 | 1枚 |
+
+- **Degeneration, fatty**: routed側の1枚(スライド33368、sim 0.69〜0.70)は丸い
+  透明な脂肪空胞を伴う典型的な脂肪変性像で、クエリ図版と視覚的に妥当な一致。
+  experiments/0031(背景除去前の旧macenko索引0012)で確認された結果を、背景
+  除去済みの0033でも再確認できた。
+- **Increased mitosis**: baseline/routedともギャラリーは生成され、タイルスコア
+  ヒートマップ上でも紡錘体・核分裂像とおぼしき領域にある程度スコアが乗っている。
+  ただし返ってきたパッチ自体には明確な核分裂像(染色体凝集や紡錘体)は見えず、
+  通常の肝細胞核が並ぶだけだった。「所見の4クラス分け」で指摘した稀少事象・
+  相対判断型の所見の既知の限界と整合的で、新規の懸念ではない。
+- **Inclusion body, intracytoplasmic**: routed側は2枚のギャラリーが生成された
+  (スライド7559・7570、sim 0.76〜0.88)が、パッチは均質なピンク色の細胞質のみで、
+  クエリ図版に見える顆粒状の好酸性クラスターに相当する構造は視認できなかった。
+  同じ atlas フォルダを experiments/0030 で whiten ルーティングして見たときの
+  「良好」評価より見え方が弱い——0033 の三択判断(GT改善幅の大きい macenko を
+  採用)がパッチ単位の見え方まで保証しないことを示す一例。
+
+### ⚠️ Hypertrophy: macenko ルーティング後もパッチギャラリーが空(要フォローアップ)
+
+baseline 側の top_slides・ヒートマップは experiments/0030 と完全に同一(索引・
+クエリとも無変更)で、baseline gallery=0 自体は0030で既に確認済みの再現。新しく
+分かったのは、**GT実測で macenko 有利(best_rank 49→14)と判定されて macenko に
+ルーティングされたのに、索引を macenko に切り替えてもギャラリーは依然として
+0枚のまま**という点——0030時点では Hypertrophy は whiten ルーティングで、
+whiten 側は2枚のギャラリーを生成できていた(baseline/whiten/macenko 三択の
+whiten 側 best_rank 16→13 も参照)。つまり0033で「GT改善幅がより大きい macenko
+を採用」と判断した際、パッチ単位の目視材料という観点では逆に retrogress してい
+たことが今回初めて分かった(0031はFatty Changeのみの目視診断で、Hypertrophy
+はGTの数字だけで判断していた)。
+
+タイルスコアヒートマップを見る限り、baseline/routed とも高スコアのタイルは
+組織の端(背景に近い領域)に偏っており、肝細胞肥大を思わせる領域を特定できて
+いない。これは「相対的判断を要する所見は単一パッチでは基準がない」という既知の
+限界(README「所見の4クラス分け」)そのものだが、0030で既に baseline について
+指摘済みだった限界が **macenko に切り替えても解消されない** ことが新しく分かった
+部分。`Proliferation, Kupffer cell`(0030で「スライド単位のbest_rankは改善して
+いてもパッチ単位では所見が見える保証がない」と指摘済み、未決定のまま)と同じ
+構図の2例目であり、GT best_rank という指標だけでルーティングを決めることの
+限界を裏付ける。baseline に戻すかどうかも含め未決定(次の一手参照)。
+
 ## 次の一手(成果物トラック)
 
 1. **glycogen deliver の137枚(job 9701)を病理知識のある人にレビューしてもらう** —
