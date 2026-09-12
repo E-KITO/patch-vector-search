@@ -1,0 +1,36 @@
+# ============================================================
+# experiments/0030: whiten ルーティング先3所見の目視診断
+# ============================================================
+# experiments/0013(タイルスコアヒートマップ + 実解像度パッチギャラリーで
+# 「返ってきたパッチが実際に所見らしく見えるか」「タイル選択バイアス
+# (局所所見の診断タイルが近似スコア競争で正常組織タイルに負け、一度も
+# 厳密再ランキングされない)がどう出るか」を目視する枠組み)を、experiments/
+# 0025-0029 のルーティング作業では一度も使っていなかった(quantitative な
+# best_rank/found だけで判断していた)。0013/0014 以来の再利用。
+#
+# 対象は lib.finding_routing.WHITEN_FINDINGS に実際に倒れた3所見の atlas
+# フォルダのみ(Hypertrophy / Kupffer Cell Hyperplasia / Cytoplasmic
+# Inclusions)。各フォルダを baseline(0018)と routed(whiten、0025)の両方で
+# 検索し、タイルスコアヒートマップ・パッチギャラリーを並べて比較する。
+# ============================================================
+
+seed: 42
+
+baseline_index_dir: "outputs/0018_20260909_build_faiss_index_deblank/default"
+whiten_index_dir: "outputs/0025_20260910_whiten_index_rebuild/default/whiten_v1"
+whiten_transform_path: "outputs/0025_20260910_whiten_index_rebuild/default/transforms/whiten.npz"
+features_dir: "data/trident_processed/20x_224px_0px_overlap/features_uni_v1"
+thumbnails_dir: "data/trident_processed/thumbnails"
+raw_slide_dir: "data/moo_collected_tggate_wsi/raw_wsi"
+atlas_root: "data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver"
+atlas_figures_csv: "data/query/nnl_liver_atlas_figures.csv"
+
+tile_size: 224
+# 現行の対話フロー既定(experiments/0020 のコメント参照)に合わせる。
+k: 20
+nprobe: 32
+rerank_pool: 200
+max_tiles_reranked: 12
+k_candidates: 8000
+top_n_slides: 20
+top_n_slides_to_plot: 3

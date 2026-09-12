@@ -1,0 +1,51 @@
+# ============================================================
+# experiments/0029: NNL アトラス全所見スイープ(baseline vs 所見ルーティング後)
+# ============================================================
+# experiments/0020(baseline 0018 vs 背景除去前 0002 の A/B)と同じ集約単位・
+# 出力構造を踏襲した新規実験(0020 自体は変更しない)。比較軸だけ「背景除去前後」
+# から「baseline(0018) vs lib.finding_routing のルーティング結果」に置き換える。
+#
+# 所見ごとのルーティングは scripts/validate_against_ground_truth.py の
+# CATEGORIES(atlas フォルダ名 → コーパス finding_type、GT実測のある7カテゴリ)を
+# 介して lib.finding_routing.WHITEN_FINDINGS を引く。CATEGORIES に無い(atlas GT
+# 未検証の)フォルダは routed 列も baseline と同一になる(保守方針)。
+# 「Liver - Necrosis」フォルダは CATEGORIES の正規マッピング通り finding_type=
+# "Single cell necrosis" として扱う(→ baseline。ユーザー確認済み、README参照)。
+#
+# whiten 索引は lib.search.PatchIndex.transform 経由で異方性除去変換をパッチ単位
+# 厳密re-rank(_exact_similarity)にも適用する(experiments/0025 の「昇格時のTODO」
+# 解消、lib/search.py 参照)。
+# ============================================================
+
+seed: 42
+
+# --- コーパス索引(2本) ---
+baseline_index_dir: "outputs/0018_20260909_build_faiss_index_deblank/default"
+whiten_index_dir: "outputs/0025_20260910_whiten_index_rebuild/default/whiten_v1"
+whiten_transform_path: "outputs/0025_20260910_whiten_index_rebuild/default/transforms/whiten.npz"
+# 両索引が共有する uni_v1 パッチ特徴量(exact re-rank の h5 読み出し元)
+features_dir: "data/trident_processed/20x_224px_0px_overlap/features_uni_v1"
+# lib.raw_patch.crop_patch のソース(生 WSI、全 1000 スライドをカバー)
+raw_slide_dir: "data/moo_collected_tggate_wsi/raw_wsi"
+# 所見フォルダの親(--atlas-root 未指定時のデフォルト)
+atlas_root: "data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver"
+# 図版メタデータ(lib.atlas_figures が対照図版 is_normal_control=yes を除外するのに使う)
+atlas_figures_csv: "data/query/nnl_liver_atlas_figures.csv"
+
+# --- クエリタイリング ---
+tile_size: 224
+
+# --- 検索パラメータ(0020 と同一、notebooks/01_query_demo.ipynb の推奨に合わせる) ---
+k: 10
+nprobe: 32
+rerank_pool: 200
+max_tiles_reranked: 12
+
+# --- 図版出力 ---
+n_query_tiles_shown: 24
+thumb_px: 224
+
+# --- report.html 生成(scripts/build_atlas_report_routed.py。experiment.py からは参照しない) ---
+report_thumb_px: 150
+report_jpeg_q: 80
+report_query_tiles: 12

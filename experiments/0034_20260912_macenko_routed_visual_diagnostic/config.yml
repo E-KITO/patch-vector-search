@@ -1,0 +1,37 @@
+# ============================================================
+# experiments/0034: macenko ルーティング先4所見の目視診断(0033=背景除去済み)
+# ============================================================
+# experiments/0030(whitenルーティング先の目視診断)の構造 + experiments/0031
+# (macenkoのper-tile染色正規化クエリ機構)を統合し、すべて lib.finding_routing
+# 経由で解決する。対象は lib.finding_routing.MACENKO_FINDINGS の4所見
+# (Hypertrophy / Increased mitosis / Inclusion body, intracytoplasmic /
+# Degeneration, fatty)— experiments/0031 は Fatty Change のみ・背景除去前の
+# 旧Macenko索引(0012)だったので、新しい0033(背景除去済み)での再確認も兼ねる。
+#
+# 索引・features_dir・変換(macenkoのtile_transform含む)はすべて
+# lib.finding_routing が内部で解決するため、ここでは表示・検索パラメータのみ。
+# ============================================================
+
+seed: 42
+
+baseline_thumbnails_dir: "data/trident_processed/thumbnails"
+macenko_thumbnails_dir: "data/trident_processed_uni_v1_macenko/thumbnails"
+raw_slide_dir: "data/moo_collected_tggate_wsi/raw_wsi"
+atlas_root: "data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver"
+atlas_figures_csv: "data/query/nnl_liver_atlas_figures.csv"
+# Fatty Change には atlas 側の finding_type マッピングが CATEGORIES に無い
+# (GTスライドが0枚のため)。CATEGORIES を補うエントリ。
+extra_atlas_folders:
+  "Liver - Fatty Change - Nonneoplastic Lesion Atlas": "Degeneration, fatty"
+
+tile_size: 224
+k: 20
+nprobe: 32
+rerank_pool: 200
+# experiments/0031 の job 10599 で、図版・タイル数が多い所見(Hypertrophy 7枚
+# 等)に対して max_tiles_reranked を絞るとギャラリーが空になった教訓により、
+# 最初から全タイル厳密re-rank。
+max_tiles_reranked: null
+k_candidates: 8000
+top_n_slides: 20
+top_n_slides_to_plot: 3

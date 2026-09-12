@@ -1,0 +1,45 @@
+# ============================================================
+# experiments/0031: Fatty Change の染色正規化(Macenko) vs プレーン 目視診断
+# ============================================================
+# Fatty Change(atlas)はコーパス内GTスライドが0枚のため、experiments/0024-0029の
+# whiten routing でも scripts/validate_against_ground_truth.py の7カテゴリGT検証
+# でも一度も評価されていない。既存のGTデータ(outputs/gt_validations/
+# gt_validation_v1_macenko_*.csv)を見ると、Macenko染色正規化は集計では
+# baseline_v1 に勝てず棚上げされたが、所見ごとに見ると勝敗が分かれている
+# (Increased mitosis/Inclusion body は macenko 有利、Hypertrophy/Hematopoiesis/
+# Kupffer は baseline 有利)。Fatty Change(大きな透明脂肪空胞という際立った
+# 形態、染色強度の影響を受けやすい)はGT評価ができないので、experiments/0013と
+# 同じ目視診断(タイルスコアヒートマップ + 実解像度パッチギャラリー)を
+# baseline(0018・プレーン)と macenko(0012・per-tile Macenko正規化)の両方で
+# Fatty Change の全8図版に対して実行する。
+# ============================================================
+
+seed: 42
+
+baseline_index_dir: "outputs/0018_20260909_build_faiss_index_deblank/default"
+baseline_features_dir: "data/trident_processed/20x_224px_0px_overlap/features_uni_v1"
+baseline_thumbnails_dir: "data/trident_processed/thumbnails"
+
+macenko_index_dir: "outputs/0012_20260901_build_faiss_index_macenko_v1/default"
+macenko_features_dir: "data/trident_processed_uni_v1_macenko/20x_224px_0px_overlap/features_uni_v1_macenko"
+macenko_thumbnails_dir: "data/trident_processed_uni_v1_macenko/thumbnails"
+# scripts/validate_against_ground_truth.py の V1_MACENKO_STAIN_REFERENCE と同一。
+macenko_stain_reference: "data/baseline/63958_x38976_y7616.png"
+
+raw_slide_dir: "data/moo_collected_tggate_wsi/raw_wsi"
+atlas_root: "data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver"
+target_finding: "Liver - Fatty Change - Nonneoplastic Lesion Atlas"
+
+tile_size: 224
+k: 20
+nprobe: 32
+rerank_pool: 200
+# 8図版・501タイルと多く、max_tiles_reranked を絞ると近似スコア上位に生き残った
+# タイルだけが候補になり、n_hits_ratio ベースの top_slides と厳密re-rankの
+# hit_pool がほぼ重ならずギャラリーが空になった(job 10599、galleries written: 0
+# ×2腕)。全タイルを厳密re-rankする(experiments/0009/0013 の「GT未検証だが
+# タイル選択バイアスに効く」設定)。
+max_tiles_reranked: null
+k_candidates: 8000
+top_n_slides: 20
+top_n_slides_to_plot: 3

@@ -1574,6 +1574,220 @@ atlas なし、正解 = 同一 FINDING_TYPE の別スライド)で、**FAISS を
   実験側は `exp****` ロガーにしかハンドラを付けないので、索引構築の進捗ログ
   (「added X/Y slides」等)が experiment.log に出ない(0018 でも同様)。
 
+## experiments/0026: 収縮白色化の α スイープ(2026-09-10、job 10557)
+
+0025 の「難所見改善 vs atlas/common所見悪化」のトレードオフを、固有値を平均へ α で
+内挿してから逆平方根を取る収縮白色化(α=0→baseline、α=1→0025 full whiten)で分離
+できないか検証。α ∈ {0.25, 0.5, 0.75} の3索引をベイク再構築して self_retrieval +
+atlas GT を測定(両端は 0025 の CSV を参照)。
+
+- **狙いは外れた**: self_retrieval の難所見改善と、0025 で悪化していた common 所見
+  (Change eosinophilic, Cellular infiltration)・atlas GT の悪化は、α=0.25 の時点で
+  すでに両方立ち上がる。α を下げても悪化だけ消える分離点は見つからなかった。
+- **結論**: 変換の「強さ」をグローバルな1本のノブ(α)で調整するアプローチはこれ以上
+  見込みが薄い。昇格は保留のまま。
+
+## experiments/0027: atlas GT 悪化の図版単位切り分け診断(2026-09-11、job 10586)
+
+0025 の whiten 索引が atlas GT(7カテゴリ)を悪化させた原因を、カテゴリ単位の
+集計(`validate_against_ground_truth.py` は1カテゴリの全図版タイルを1回のマルチ
+タイルクエリに束ねる)では切り分けられなかったため、`scripts/atlas_per_image_diagnostic.py`
+で atlas 図版1枚ずつ個別にクエリし、baseline(0018)/ whiten(0025 full whiten)の
+best_rank を比較(索引再構築なし、既存索引をそのまま使用)。
+
+- **degradation は少数の外れ値図版ではなく、所見(finding)によっては図版全体に
+  一様に広がっている**:
+
+  | finding | 図版数 | 悪化した図版 | 傾向 |
+  |---|---|---|---|
+  | Single cell necrosis | 10 | 9/10 | ほぼ全図版が一様に悪化(+18〜+211) |
+  | Hematopoiesis, extramedullary | 4 | 4/4 | **全図版**が一様に悪化(+40〜+108) |
+  | Hypertrophy | 7 | 2/7 | 逆にほとんどの図版で改善(-4〜-60) |
+  | Inclusion body, intracytoplasmic | 2 | 0/2 | 両方とも大きく改善(-127, -156) |
+  | Deposit, glycogen | 4 | 2/4 | ほぼ拮抗(1図版は baseline 未検出GTを新規発見) |
+
+  atlas GT 悪化の主犯として 0025 で名指しされた2カテゴリ(Single cell necrosis,
+  Hematopoiesis extramedullary)は、そのカテゴリの図版のほぼ全部/全部が同じ方向に
+  悪化しており、1〜2枚の外れ値図版が平均を引きずり下げているのではない。逆に
+  Hypertrophy / Inclusion body は図版レベルでもほぼ一貫して改善している。
+- **解釈**: 外れ値仮説は棄却され、構造的なドメインギャップ仮説を支持する結果。
+  ただし「atlas クエリ全般 vs コーパス」という一枚岩のギャップではなく、**所見
+  ごとに白色化との相性が系統的に違う**——Single cell necrosis / Hematopoiesis
+  extramedullary の atlas 図版群は、白色化が増幅する小固有値方向とズレの方向が
+  重なって悪化する一方、Hypertrophy / Inclusion body は逆に恩恵を受けている、
+  という構図。
+
+### 追加検証: 単純表記「Necrosis」(n=13)で評価すると結論が逆転する(job 10589)
+
+`Liver - Necrosis` atlas フォルダは `CATEGORIES` で `Single cell necrosis`
+(コーパス内 GT わずか4枚)にしかマッピングされていなかった。同じ atlas 図版群を
+コーパス内によりGTが多い(13枚)単純表記の `Necrosis` ラベルで評価し直したところ
+(`EXTRA_CATEGORIES`、新規 atlas 図版は不要)、**同じ図版なのに結論が逆転した**:
+
+| finding | 図版数 | 悪化した図版 | 悪化幅の合計 |
+|---|---|---|---|
+| Single cell necrosis(n=4) | 10 | 9/10 | 悪化が支配的 |
+| Necrosis(n=13) | 10 | 4/10 | **-282(改善が支配的、6枚が-68〜-124の大幅改善)** |
+
+`Single cell necrosis` の悪化は GT4枚という小標本の偏りだった可能性が高く、より
+多くのGTを持つ `Necrosis` ラベルで見ると白色化はこの atlas 図版群にむしろ有効、
+という評価に変わる。**同じ atlas フォルダでも、クエリに付与する所見ラベルが違えば
+ルーティングの結論も変わる** —— 索引の出し分けは atlas フォルダ単位ではなく
+finding_type 単位で行うべきという設計上の含意。
+
+### 所見ごとのルーティング表(GT実測ベース、0028で最終確定)
+
+| finding | 根拠 | ルーティング |
+|---|---|---|
+| Hypertrophy | 7枚中5枚改善(net改善)、median best_rank 16→13 | **whiten** |
+| Necrosis | 10枚中6枚改善、median best_rank 136→115.5 | **whiten** |
+| Proliferation, Kupffer cell | median best_rank 78→72 | **whiten** |
+| Inclusion body, intracytoplasmic | 2枚とも大幅改善、median best_rank 481.5→340 | **whiten** |
+| Single cell necrosis | 10枚中9枚悪化、median best_rank 29→104 | **baseline** |
+| Hematopoiesis, extramedullary | 4枚とも悪化、median best_rank 42.5→103 | **baseline** |
+| Increased mitosis | 唯一の図版(n=1)が悪化 | **baseline**(サンプル数少なくatlas実測を優先) |
+| Deposit, glycogen | found(検出数)は whiten が優位(16→24)だが、median best_rank は大幅悪化(10→79) | **baseline**(0028で修正、下記参照) |
+| 上記以外(atlas GT未検証、約9所見) | 実測なし | **baseline**(保守方針。悪化しないと確認できるまでは whiten を使わない) |
+
+未検証の所見のうち、ドメイン的に atlas カテゴリと対応しうる候補(Cellular
+infiltration↔Inflammation, Vacuolization cytoplasmic↔Fatty Change)はあるが、
+ラベルの医学的妥当性が未確認のため今回は保留。
+
+## experiments/0028: 所見ごとの索引ルーティング実装 + 検証(2026-09-11、ローカル実行)
+
+`lib/finding_routing.py` を実装:所見ラベル(finding_type)を受け取り、対応する
+索引ディレクトリ(baseline=0018 / whiten=0025 whiten_v1)を返す
+`index_dir_for_finding()`。ルーティング表は `WHITEN_FINDINGS` に定数として持つ。
+検証は新規計算なしで experiments/0025(self_retrieval)/ 0027(atlas 図版単位)の
+既存 CSV を再集計するだけなので GPU 不要、capsule 内でローカル実行(Slurm 投入なし)。
+
+- **self_retrieval**: routed は whiten に倒した4所見(Hypertrophy, Necrosis,
+  Proliferation Kupffer cell, Inclusion body)だけ whiten の値を採用、残りは
+  baseline のまま = 悪化した所見(Change eosinophilic, Cellular infiltration 等)
+  は一切触れずに難所見(Hypertrophy, Necrosis, granular 系)の改善だけ享受する形。
+- **atlas GT の再検証で Deposit, glycogen のルーティングを修正**: found(検出数)
+  だけを見ると whiten が優位(16→24)だったため 0027 では whiten 寄りと判断したが、
+  この repo の主指標である **median best_rank で見ると whiten は大幅悪化
+  (10→79)** だった。found と best_rank が逆方向を指すケースがあることが分かり、
+  glycogen は baseline に修正。それ以外の所見は found と best_rank が同じ方向を
+  指しており判断は変わらなかった。
+- **教訓**: 「routed の値が baseline/whiten のどちらかをそのまま採用する」構造だと
+  「routed が両方より悪化していないか」というチェックは定義上必ず true になり
+  無意味(最初の実装のミス)。意味があるのは「選んだ側が選ばなかった側より
+  本当に良いか」を所見ごとに直接比較すること。
+- **結果**: 修正後、全8 GT検証済み所見で「選んだ側の median best_rank が選ばなかった
+  側以下」であることを確認(`outputs/0028_.../default/summary.md`)。
+
+## experiments/0029: アトラスデモへの所見ルーティング適用(2026-09-11、job 10595)
+
+`lib/finding_routing.py`(所見ラベル→索引の出し分け)を、NNL アトラス全25所見の
+検索デモに実際に適用した新規実験(`experiments/0020` は背景除去A/Bのまま変更せず)。
+所見ごとに baseline(0018)と routed(該当すれば whiten)を並べて検索し、実解像度
+パッチギャラリーを含む report.html を生成。25所見中3所見(Hypertrophy /
+Proliferation, Kupffer cell / Inclusion body, intracytoplasmic)だけ routed 列が
+whiten に切り替わり、残り22所見は baseline のまま(想定通り)。
+
+## experiments/0030: whiten ルーティング先3所見の目視診断(2026-09-11、job 10598)
+
+`experiments/0013`(タイルスコアヒートマップ + 実解像度パッチギャラリーで、
+GT best_rank だけでは見えない「返ってきたパッチが所見らしく見えるか」「タイル
+選択バイアス」を目視する枠組み)を、0025-0029 のルーティング作業で初めて適用。
+whiten に倒れた3所見(atlas 図版計10枚)を baseline/routed 両方で目視した。
+
+- **Cytoplasmic Inclusions**: 良好。クエリ図版は「丸い好酸性〜淡明な封入体が
+  画像全体に広がる」whole-patchテクスチャ型の所見で、routed側のパッチも同様の
+  丸い空胞・淡明領域を伴うテクスチャを示し、視覚的に妥当。baseline側はギャラリー
+  すら1枚も生成されなかった(上位ランクのスライドがexact-rerankプールに一度も
+  入らなかった)— むしろ baseline の弱さを裏付ける。
+- **Hypertrophy**: 明確な肥大所見は見えないが、これは既知の限界(相対的判断を
+  要する所見は単一パッチでは基準がない、README「所見の4クラス分け」参照)と
+  整合的で、新たな懸念ではない。
+- **⚠️ Proliferation, Kupffer cell**: 懸念あり。クエリ図版は**局所的**な所見
+  (画像の大部分は平凡な肝細胞組織、中央付近に小さなクッパー細胞集塊が1箇所のみ)。
+  baseline/routed 両方とも、返ってきたパッチはクッパー細胞集塊が視覚的に
+  はっきり写っているとは言えない平凡な組織だった。スライド単位のbest_rankは
+  改善していても、パッチ単位では所見が見える保証がないことが分かった。この所見は
+  コーパス内GTがわずか2枚・atlas図版も1枚とルーティングの根拠自体が薄く、
+  whitenへの昇格は再検討の余地がある(未決定、次の一手参照)。
+
+## experiments/0031: Fatty Change の Macenko vs プレーン 目視診断(2026-09-11、jobs 10599/10600)
+
+Fatty Change はコーパス内GTスライドが0枚で、7カテゴリGT検証にも今回のwhiten
+routingにも一度も入っていなかった(定量評価の手段が無い)。ユーザーが
+「experiments/0013 では Fatty Change の検索が良く見えたが 0029 のレポートでは
+そうでもない」と指摘 — 調べると **0013 は Macenko染色正規化コーパス(0012)+
+per-tile正規化クエリを使っていたのに対し、0029 は Fatty Change を whiten
+ルーティング対象に含んでおらず baseline(染色正規化なし)のままだった**ことが
+原因と判明(別パイプラインを比較していた)。
+
+- **既存データの再確認**: `outputs/gt_validations/gt_validation_v1_macenko_per_tile.csv`
+  (7カテゴリGT、baseline_v1 vs v1_macenko、以前から存在)を見ると、Macenko染色
+  正規化も集計では baseline_v1 に勝てず棚上げされていたが、**所見ごとには
+  明確に勝敗が分かれていた**:
+
+  | finding | baseline best | macenko(per_tile) best | 傾向 |
+  |---|---|---|---|
+  | Hypertrophy | 49 | **14** | macenko有利 |
+  | Increased mitosis | 7 | **1** | macenko有利 |
+  | Inclusion body, intracytoplasmic | 480 | **97** | macenko有利 |
+  | Single cell necrosis | 10 | 77 | baseline有利 |
+  | Deposit, glycogen | 7 | 14 | baseline有利 |
+  | Hematopoiesis, extramedullary | 25 | 84 | baseline有利 |
+  | Proliferation, Kupffer cell | 202 | 766 | baseline有利(大差) |
+
+  whitening と同じ「集計では勝てないが所見ごとには系統的な勝敗がある」構図。
+- **Fatty Change の目視結果**(GT無いため目視のみ、`experiments/0031`): macenko側の
+  パッチ(スライド33368、sim 0.69〜0.70)は、クエリ図版(丸い透明な脂肪空胞が
+  肝細胞全体に広がる典型的な脂肪変性像)と同様の**丸い空胞テクスチャ**を示し、
+  視覚的に妥当な一致だった。baseline側はギャラリーが2回(通常・全タイル厳密
+  re-rank後)とも空 — n_hits_ratio 上位スライドと厳密類似度上位200件プールが
+  全く重ならなかった(top5スライドが baseline/macenko で完全に別集合)。
+- **⚠️ 未解決の設計課題 → 解消**: Macenko索引(0012)は背景除去前(0002相当の
+  ハイパラ)で構築されており、現行のbaseline(0018、背景除去済み)と同一コーパス
+  世代ではなかった。また GT比較で macenko 有利と出た所見のうち Hypertrophy と
+  Inclusion body は whiten でも有利と出ており、baseline/whiten/macenko の
+  三択が必要になった所見が2つ生じていた。ユーザー確認の上で両方とも解決:
+
+## experiments/0032・0033: 背景除去済みMacenko索引の再構築(2026-09-11〜12、jobs 10603/10604)
+
+experiments/0032: experiments/0017 と同じ背景除去ロジック(corpus_blankness.parquet、
+sat_frac<0.10)を Macenko manifest(experiments/0010)に適用。**発見: Macenko
+コーパスは独立した wsi_preprocess 抽出のため、1000スライド中12枚でタイリング
+境界の非決定性によるパッチ数のわずかなズレ(数パッチ)があり、plain コーパスの
+blankness 除外リストをそのまま当てると exclusion 行が範囲外になって
+fail-fast した**(job 10601、`lib.manifest.build_patch_manifest` の意図通りの
+安全装置)。local_idx が1件でもズレると以降の対応が総崩れになるため、除外
+リストを補正して当てはめるのではなく、**該当12スライドだけ背景除去をスキップ**
+(全パッチ保持)する方針で修正(`_adjust_blankness_for_corpus`)。最終的に
+17,981,963パッチ(背景386,372枚=2.1%除外、0018とほぼ同水準)。
+
+experiments/0033: 0032の出力から、0012/0018と完全同一のFAISSハイパラ
+(nlist=4096, pq_m=64, pq_nbits=8, opq_niter=10)で索引を再構築。
+
+Hypertrophy/Inclusion body の三択は、GT改善幅がより大きい macenko を採用
+(Hypertrophy: whiten median best_rank 16→13 vs macenko 49→14。Inclusion body:
+whiten 481.5→340 vs macenko 480→97)。`lib/finding_routing.py` を baseline/
+whiten/macenko の3択に拡張:
+
+| finding | ルーティング | 根拠 |
+|---|---|---|
+| Hypertrophy | **macenko** | GT改善幅大(49→14) |
+| Increased mitosis | **macenko** | GT改善(7→1)、whitenとの競合なし |
+| Inclusion body, intracytoplasmic | **macenko** | GT改善幅大(480→97) |
+| Degeneration, fatty | **macenko** | GTなし、experiments/0031の目視診断で妥当性確認 |
+| Necrosis | whiten | 変更なし |
+| Proliferation, Kupffer cell | whiten | 変更なし(0030で懸念あり、次の一手参照) |
+| 上記以外 | baseline | 保守方針(実測なし/macenko・whitenとも不利) |
+
+macenko ルーティング所見はコーパス自体が別 h5 特徴量群(`MACENKO_FEATURES_DIR`)
+なので、クエリ画像も `query_tile_transform_for_finding` で per-tile Macenko
+正規化してから埋め込む必要がある(`lib/finding_routing.py` 参照)。
+
+**未解決のまま残っている件**: `Proliferation, Kupffer cell` は whiten ルーティング
+のままだが、experiments/0030 の目視診断で「パッチ単位では所見が視覚的に見えて
+いない」懸念が出ており、GT根拠も薄い(コーパス内GT2枚・atlas図版1枚)。baseline
+に戻すかどうかは未決定。
+
 ## 次の一手(成果物トラック)
 
 1. **glycogen deliver の137枚(job 9701)を病理知識のある人にレビューしてもらう** —

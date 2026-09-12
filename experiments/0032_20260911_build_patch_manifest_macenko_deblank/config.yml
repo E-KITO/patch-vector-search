@@ -1,0 +1,19 @@
+# ============================================================
+# Experiment Configuration
+# ============================================================
+# 0032: experiments/0010(Macenko染色正規化コーパスのmanifest)に、experiments/
+# 0017 と同じ背景パッチ除去(sat_frac<0.10)を適用したもの。README
+# 「experiments/0031」で発覚した「Macenko索引(0012)が背景除去前コーパスで
+# 現行baseline(0018)と世代が揃っていない」問題を解消するための再構築。
+# 0017 との違いは features_dir のみ(染色正規化ありのMacenkoコーパス)。
+# ============================================================
+
+seed: 42
+features_dir: "data/trident_processed_uni_v1_macenko/20x_224px_0px_overlap/features_uni_v1_macenko"
+train_sample_size: 500000
+
+# 0017 と全く同じ blankness 測定を再利用(生WSIピクセルのsat_fracなので
+# 染色正規化の有無に依存しない。タイリング幾何は0010の設計によりプレーンな
+# uni_v1コーパスと同一 — local_idx がそのまま対応する)。
+background_blankness_path: "outputs/measure_corpus_blankness/corpus_blankness.parquet"
+background_sat_frac_max: 0.10

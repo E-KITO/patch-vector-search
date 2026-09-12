@@ -120,9 +120,9 @@ def main() -> None:
     project_root = _get_project_root()
     sys.path.insert(0, str(project_root))
 
+    from lib.finding_routing import load_index_for_finding
     from lib.output_utils import complete_run, get_run_dir, write_run_metadata
     from lib.patch_set import build_patch_set
-    from lib.search import PatchIndex
 
     exp_name = os.environ["EXP_NAME"]
     output_root = os.environ.get("OUTPUT_ROOT")
@@ -141,7 +141,6 @@ def main() -> None:
     logger = setup_logger(run_dir, exp_name)
 
     seed = int(config.get("seed", 42))
-    index_exp_dir = project_root / config["index_exp_dir"]
     features_dir = project_root / config["features_dir"]
     raw_slide_dir = project_root / config["raw_slide_dir"]
     gt_csv = project_root / config["gt_csv"]
@@ -164,12 +163,14 @@ def main() -> None:
 
     rng = np.random.default_rng(seed)
 
-    pi = PatchIndex.load(
-        index_path=index_exp_dir / "index.faiss",
-        manifest_path=index_exp_dir / "manifest.parquet",
-        slide_meta_path=index_exp_dir / "slide_meta.parquet",
-        features_dir=features_dir,
-    )
+    # lib.finding_routing: 所見ラベルごとに baseline/whiten/macenko 索引を出し
+    # 分ける(README「所見ごとのルーティング表」参照)。現状の SUPPORTED_FINDINGS
+    # はいずれも whiten/macenko 対象外なので、このリストが変わらない限り
+    # baseline と同じ結果になる。macenko ルーティング対象の所見をこのトラックに
+    # 追加する場合、クエリも corpus 自身のスライドから直接 h5 を読む方式なので
+    # features_dir を MACENKO_FEATURES_DIR に切り替える対応が別途必要になる
+    # (lib.finding_routing.load_index_for_finding のdocstring参照、現状未対応)。
+    pi = load_index_for_finding(args.finding)
     corpus_slides = set(pi.slide_meta.index.astype(str))
 
     gt = pd.read_csv(gt_csv)

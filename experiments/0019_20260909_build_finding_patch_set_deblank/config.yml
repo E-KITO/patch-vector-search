@@ -2,8 +2,13 @@
 # Experiment Configuration
 # ============================================================
 # 0019: experiments/0015 の deliver を、背景除去済みコーパス(experiments/0018)
-# で回し直す A/B。0015 との違いは index_exp_dir の1点のみ — encoder(uni_v1)、
+# で回し直す A/B。0015 との違いは索引の1点のみ — encoder(uni_v1)、
 # パッチジオメトリ(224px)、features_dir、探索/後処理パラメータはすべて 0015 と同一。
+#
+# 索引は lib.finding_routing.load_index_for_finding(finding, features_dir) が
+# 所見ラベルごとに選ぶ(README「所見ごとのルーティング表」参照)。現状の
+# SUPPORTED_FINDINGS はいずれも whiten 対象外なので実際には baseline(0018)
+# 固定と同じ結果になる — 将来 Hypertrophy/Necrosis 等を再挑戦する時のための配線。
 #
 # 0018 = 0002 のコーパスから sat_frac < 0.10(実質無染色 = スライド背景・切片
 # エッジ・カバーガラス由来アーティファクト)のパッチ 389,959件(2.12%)を manifest
@@ -25,7 +30,6 @@
 # --- Hyperparameters ---
 seed: 42
 
-index_exp_dir: "outputs/0018_20260909_build_faiss_index_deblank/default"
 features_dir: "data/trident_processed/20x_224px_0px_overlap/features_uni_v1"
 raw_slide_dir: "data/moo_collected_tggate_wsi/raw_wsi"
 gt_csv: "data/processed_csv/single_finding_liver.csv"
