@@ -1,5 +1,7 @@
 """所見ラベルに対する One-vs-Rest 線形分類器で、クエリタイルを「その所見らしいか」で
-再スコアする(experiments/0035、複数所見での再試行はexperiments/0036)。
+再スコアする(experiments/0035、複数所見での再試行はexperiments/0036)。コーパスGTが
+無い所見向けにatlas図版自体を正例にする変種はexperiments/0037
+(train_and_evaluate_classifier_from_atlas / loio_auroc_by_image)。
 
 分類器の学習・batch-confound検証に加えて、atlas図版のタイル分割・埋め込み・スコア
 ヒートマップ描画・検索腕(unfiltered/ovr_filtered)の実行という、この手法をどの所見に
@@ -160,6 +162,26 @@ def resolve_atlas_images(project_root: Path, config: dict, target_finding: str) 
         cat_dir = atlas_root / folder_name
         images.extend(str(p) for p in query_images(cat_dir, atlas_csv=atlas_csv))
     return images
+
+
+def list_atlas_folders(atlas_root: Path, atlas_csv: Path) -> list[tuple[str, list[str]]]:
+    """atlas_root配下の全所見フォルダを、コーパスGTの有無やCATEGORIESマッピングに
+    関係なく列挙する(experiments/0029のresolve_findingsと同じロジック——GTが
+    無い所見にも同じ枠組みを適用するexperiments/0037用)。resolve_atlas_images
+    はCATEGORIES経由でコーパスfinding_typeに対応するフォルダしか拾えないため、
+    25所見全部を対象にする場合はこちらを使う。
+
+    Returns:
+        [(folder_name, [image_path, ...]), ...](画像のあるフォルダのみ)
+    """
+    from lib.atlas_figures import query_images
+
+    out = []
+    for sub in sorted(p for p in atlas_root.iterdir() if p.is_dir()):
+        imgs = [str(p) for p in query_images(sub, atlas_csv=atlas_csv)]
+        if imgs:
+            out.append((sub.name, imgs))
+    return out
 
 
 def tile_grid_crops(pil_image, tile_size: int, crop_size: int):
@@ -391,6 +413,147 @@ def train_and_evaluate_classifier(project_root, config: dict, manifest, target_f
         "loso_n_folds": int(len(loso_df)) if loso_df is not None else 0,
     }
     return final_clf, loso_df, diagnostics
+
+
+def embed_atlas_images_as_positives(images: list[str], tile_size: int) -> tuple[np.ndarray, np.ndarray]:
+    """コーパス内GTが無い所見向け: atlas図版自体のタイルを正例として埋め込む
+    (experiments/0037)。
+
+    corpus GT スライドのパッチを正例にする train_and_evaluate_classifier と違い、
+    ここでの「正例」は図版1枚の全タイル——GTスライドの全パッチを正例とする既存の
+    弱ラベル(README「評価に使ったデータとその限界」)よりさらに一段弱い。atlas
+    図版は「所見部位を含む図版全体」であり、矢印注釈・周囲の正常組織・余白を含む
+    タイルも区別なく正例に混入する(README「アトラス画像1枚は所見部位を含む図版
+    全体」)。目視での結果解釈時にこの点を割り引くこと。
+
+    Returns:
+        (vectors [N, dim] L2正規化済み, image_path_per_row [N])
+    """
+    from PIL import Image as PILImage
+
+    vecs, image_ids = [], []
+    for image_path in images:
+        pil_image = PILImage.open(image_path).convert("RGB")
+        _, _, crops, _ = tile_grid_crops(pil_image, tile_size, tile_size)
+        v = embed_tile_crops(crops, tile_size)
+        vecs.append(v)
+        image_ids.extend([image_path] * len(v))
+    return np.concatenate(vecs, axis=0), np.array(image_ids)
+
+
+def loio_auroc_by_image(
+    pos_vecs: np.ndarray,
+    pos_image_ids: np.ndarray,
+    neg_train_vecs: np.ndarray,
+    neg_test_vecs: np.ndarray,
+    C: float,
+    seed: int,
+) -> pd.DataFrame:
+    """atlas図版単位の leave-one-image-out 交差検証(loso_auroc_by_studyのGT無し版)。
+
+    コーパスGTが無い所見では study(EXP_ID) という単位がそもそも無いため、代わりに
+    「同じ所見の他の図版から学習して、見たことのない図版のタイルを当てられるか」を
+    見る。これは**自己一貫性チェックであり、コーパス上の実際の正解に紐づいた検証
+    ではない**——atlas図版群自体が互いに似ていれば高AUROCになるし、逆に図版ごとに
+    見え方が大きく違う所見(倍率不揃い・染色差)では低くなりうるが、どちらの場合も
+    「コーパス内でこの所見を正しく引けているか」は保証しない(loso_auroc_by_study
+    のdocstring、および README「評価に使ったデータとその限界」参照)。
+
+    図版が1枚しかない所見はheld-outを作れないため空のDataFrameを返す。
+    """
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.metrics import roc_auc_score
+
+    images = sorted(set(pos_image_ids.tolist()))
+    rows = []
+    for held_out in images:
+        held_mask = pos_image_ids == held_out
+        train_pos, test_pos = pos_vecs[~held_mask], pos_vecs[held_mask]
+        if len(train_pos) == 0 or len(test_pos) == 0:
+            continue
+        X = np.concatenate([train_pos, neg_train_vecs], axis=0)
+        y = np.concatenate([np.ones(len(train_pos)), np.zeros(len(neg_train_vecs))])
+        clf = LogisticRegression(C=C, class_weight="balanced", max_iter=2000, random_state=seed)
+        clf.fit(X, y)
+
+        X_test = np.concatenate([test_pos, neg_test_vecs], axis=0)
+        y_test = np.concatenate([np.ones(len(test_pos)), np.zeros(len(neg_test_vecs))])
+        score = clf.decision_function(X_test)
+        rows.append({
+            "held_out_image": Path(held_out).stem,
+            "n_train_pos": int(len(train_pos)),
+            "n_test_pos": int(len(test_pos)),
+            "auroc": float(roc_auc_score(y_test, score)),
+        })
+    return pd.DataFrame(rows)
+
+
+def train_and_evaluate_classifier_from_atlas(
+    project_root, config: dict, manifest, images: list[str], target_finding: str,
+    exclude_slides: set[str], logger,
+):
+    """train_and_evaluate_classifier のコーパスGT無し版(experiments/0037)。
+
+    正例を GT スライドのパッチではなく images(atlas図版)自体のタイルから作る。
+    負例サンプリングは従来通りコーパス全体からだが、CATEGORIES 経由で対応する
+    コーパス finding_type が分かっている場合は exclude_slides(呼び出し側が
+    load_gt_slides_for_finding で解決)でその既知GTスライドを負例から除外できる
+    (コーパスに本物が混じって負例を汚染するのを避けるため)。対応が無ければ
+    exclude_slides は空集合でよい。
+
+    Returns:
+        (final_classifier, loio_df | None, diagnostics: dict)
+    """
+    rng = np.random.default_rng(config.get("seed", 42))
+    features_dir = project_root / config["features_dir"]
+    tile_size = int(config.get("tile_size", 224))
+
+    pos_vecs, pos_image_ids = embed_atlas_images_as_positives(images, tile_size)
+    logger.info(f"positive tiles sampled: {pos_vecs.shape[0]} from {len(images)} atlas image(s)")
+
+    neg_vecs, neg_slide_ids = sample_negative_pool(
+        manifest, features_dir, n=config["n_negative_patches"],
+        exclude_slides=exclude_slides, rng=rng,
+    )
+    logger.info(f"negative patches sampled: {neg_vecs.shape[0]} from {len(set(neg_slide_ids))} slides")
+
+    perm = rng.permutation(len(neg_vecs))
+    n_test = int(round(len(neg_vecs) * config["neg_test_fraction"]))
+    neg_test_vecs = neg_vecs[perm[:n_test]]
+    neg_train_vecs = neg_vecs[perm[n_test:]]
+
+    n_images = len(set(pos_image_ids.tolist()))
+    if n_images >= 2:
+        loio_df = loio_auroc_by_image(
+            pos_vecs, pos_image_ids, neg_train_vecs, neg_test_vecs,
+            C=config["classifier_C"], seed=config.get("seed", 42),
+        )
+        if len(loio_df):
+            logger.info(f"LOIO AUROC (median={loio_df['auroc'].median():.3f}, "
+                        f"min={loio_df['auroc'].min():.3f}, max={loio_df['auroc'].max():.3f}, "
+                        f"n_folds={len(loio_df)}):\n{loio_df}")
+        else:
+            logger.warning("LOIO produced 0 usable folds")
+    else:
+        loio_df = None
+        logger.warning(f"only {n_images} atlas image for {target_finding!r} — cannot "
+                        "leave-one-image-out. Skipping LOIO.")
+
+    final_clf = train_logreg(pos_vecs, np.concatenate([neg_train_vecs, neg_test_vecs]),
+                              C=config["classifier_C"], seed=config.get("seed", 42))
+
+    diagnostics = {
+        "target_finding": target_finding,
+        "n_positive_tiles": int(pos_vecs.shape[0]),
+        "n_atlas_images": n_images,
+        "n_negative_patches": int(neg_vecs.shape[0]),
+        "n_negative_slides": int(len(set(neg_slide_ids))),
+        "loio_median_auroc": float(loio_df["auroc"].median()) if loio_df is not None and len(loio_df) else None,
+        "loio_min_auroc": float(loio_df["auroc"].min()) if loio_df is not None and len(loio_df) else None,
+        "loio_max_auroc": float(loio_df["auroc"].max()) if loio_df is not None and len(loio_df) else None,
+        "loio_n_folds": int(len(loio_df)) if loio_df is not None else 0,
+    }
+    return final_clf, loio_df, diagnostics
 
 
 def loso_auroc_by_study(
