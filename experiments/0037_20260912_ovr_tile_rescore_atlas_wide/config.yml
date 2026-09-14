@@ -1,0 +1,49 @@
+# ============================================================
+# experiments/0037: OvRタイル事前重み付けを、コーパスGTの無い所見も含む
+# NNLアトラス全25所見に展開する
+# ============================================================
+# experiments/0035・0036(コーパス内GT正例スライドを使うOvR)は、GTが確定して
+# いる7所見にしか適用できなかった(single_finding_liver.csvに対応スライドが
+# あるのはNNL 25所見中この7つだけ)。残り18所見にも同じ枠組みを試すため、正例の
+# 出所を「コーパスGTスライドのパッチ」から「そのatlas図版自体のタイル」に変える
+# (lib.ovr_scoring.train_and_evaluate_classifier_from_atlas)。
+#
+# 検証もstudy単位のLOSOから、atlas図版単位のleave-one-image-out(LOIO)に変更。
+# これは「同じ所見の他の図版から学習して未見の図版を当てられるか」という自己
+# 一貫性チェックであり、コーパス上の実際の正解に紐づいた検証ではない
+# (lib/ovr_scoring.pyのloio_auroc_by_imageのdocstring参照)——目視でしか妥当性を
+# 確認できない点はREADME「評価に使ったデータとその限界」の19カテゴリと同じ制約。
+#
+# 対象フォルダは atlas_root 直下を実行時に列挙する(experiments/0029と同じ
+# 方式、config に25個の所見名を手打ちしない——アトラスのフォルダ名にはハイフンと
+# 紛らわしいenダッシュ「–」混在があり転記ミスの元になるため)。
+# ============================================================
+
+seed: 42
+
+gt_csv: "data/processed_csv/single_finding_liver.csv"
+
+index_dir: "outputs/0018_20260909_build_faiss_index_deblank/default"
+features_dir: "data/trident_processed/20x_224px_0px_overlap/features_uni_v1"
+
+# --- 分類器の学習データ(experiments/0035・0036と揃える) ---
+n_negative_patches: 6000
+neg_test_fraction: 0.2
+classifier_C: 1.0
+
+# --- タイル事前重み付け(experiments/0035・0036と同一) ---
+keep_frac: 0.3
+
+# --- atlas クエリ・検索パラメータ ---
+atlas_root: "data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver"
+atlas_figures_csv: "data/query/nnl_liver_atlas_figures.csv"
+raw_slide_dir: "data/moo_collected_tggate_wsi/raw_wsi"
+baseline_thumbnails_dir: "data/trident_processed/thumbnails"
+
+tile_size: 224
+nprobe: 32
+rerank_pool: 200
+max_tiles_reranked: null
+k_candidates: 8000
+top_n_slides: 20
+top_n_slides_to_plot: 3
