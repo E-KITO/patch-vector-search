@@ -2030,6 +2030,79 @@ leave-one-image-out(LOIO、87図版プール)で評価した。
   ことが自然な続き(experiments/0025の白色化と同様、必ずGT/目視の両方で検証
   してから採否判断すること——README「experiments/0037」以降の教訓)。
 
+## experiments/0039・0040: atlas→corpus ドメインギャップの線形補正(平均シフト)(2026-09-14、jobs 10672/10674)
+
+experiments/0038で確認された「所見によらずほぼ一定(10〜12)のドメインスコア差」
+を踏まえ、最も単純な線形補正——atlas図版タイルの平均埋め込みからコーパスの
+ランダムパッチの平均埋め込みを引いた `domain_shift` ベクトルを、個々のatlas
+クエリ埋め込みから差し引いてL2再正規化してから検索する——を試した。索引・
+コーパス側は無変更(baseline 0018のまま)、クエリ埋め込みベクトルへの後処理
+のみで、macenko/whitenと違い別コーパスの再構築が不要な最も軽量な補正案。
+検証は `scripts.validate_against_ground_truth.run_comparison` によるGT
+best_rank比較と、コーパスGT対応7所見の目視ギャラリー診断
+(`lib.ovr_scoring.run_query_arm`)の両方で行った。
+
+- **experiments/0039(alpha=1.0、domain_shiftをそのまま適用)は明確に否定的**。
+  GT best_rankが7所見中5所見で悪化(Hypertrophy 30→180、Hematopoiesis
+  28→419など)、**2所見(Proliferation, Kupffer cell / Inclusion body,
+  intracytoplasmic)はGTスライドが候補プールから完全に消失**(found 2/2→0/2、
+  1/1→0/1)。domain_shiftのノルムは0.6309(単位ベクトル空間でかなり大きい)で
+  補正が強すぎたと判断。**一方でギャラリー数は7所見中6所見で増加**——これは
+  改善ではなく別の失敗モードだと判明(下記参照)。
+- **experiments/0040(alpha=0.25/0.5/0.75のスイープ、domain_shiftはexperiments/0039
+  のものを再利用)で最良のalphaを探索**。GTスライドの消失(found減少)が無い
+  唯一のalphaは**0.25**(alpha=0.5/0.75はKupffer・Inclusion bodyでfoundが
+  減少する)。alpha=0.25では7所見中4所見が改善(Hypertrophy 30→25、
+  Necrosis 14→8、Increased mitosis 10→7かつfound 9/10→10/10、Hematopoiesis
+  28→22)、3所見が悪化(glycogen 7→9、Kupffer 78→120、Inclusion body 475→696)
+  ——macenko/whitenと同じ「所見依存で明暗が分かれる」構図。ギャラリー数の変化も
+  この方向感と一致する穏当なもの(alpha=1.0の不自然な急増とは異なる)。
+
+**教訓(alpha=1.0のギャラリー急増は見せかけだった)**: alpha=1.0でギャラリー数が
+増えたのは、GT best_rankが同時に大きく悪化していたことから、正解のGTスライド
+ではなく**別の(誤った)スライドに自信を持って飛びついていた**ためと考えられる。
+ギャラリーは「exact-rerankプールに実パッチが入るか」だけを見ており、正解かどうか
+は問わない——GT数値の裏付けが無いギャラリー数の増加は、改善の根拠にならない
+(下記experiments/0041でも同型の事例を目視で確認)。
+
+## experiments/0041: Macenko + 線形補正の併用を全25所見で目視検証(2026-09-14、job 10675)
+
+macenko(per-tile染色正規化+別コーパス索引、`MACENKO_FINDINGS`)と線形ドメイン
+補正(experiments/0039・0040)は、いずれも plain(baseline)コーパス・埋め込み
+空間を基準に個別検証したものだった。両方を重ねた場合の効果、およびGTが無い
+18所見での見え方を確認するため、macenko空間(macenko per-tile正規化クエリ+
+macenko索引)を基準に`domain_shift`を独立に再計算し(plain空間のものは埋め込み
+分布が異なるため流用せず、交絡を避けた)、alpha=0.25(experiments/0040のスイープ
+結果を流用、macenko空間で独立の再チューニングはしていない)でNNLアトラス全25
+所見に「macenko単独」vs「macenko+線形補正併用」の2腕で目視ギャラリー診断を
+実行した。GT対応7所見についてはGT best_rank比較も追加した。
+
+- **GT best_rank(macenko→macenko+線形補正)**: 7所見中3所見が改善
+  (Deposit, glycogen 14→6、Hematopoiesis 83→31、Inclusion body 52→41)、
+  1所見が同値(Increased mitosis 1→1)、2所見が悪化(Hypertrophy 18→25、
+  Necrosis 85→121)、1所見はどちらも壊滅的(Kupffer 873→884、found 1/2で不変)。
+- **全25所見のギャラリー数**は25所見中9所見で減少・6所見で増加・10所見で不変と、
+  こちらも一律の傾向は無い。
+- **⚠️ 実際にギャラリー画像を目視して判明した重要な点**: GT数値とギャラリー数の
+  変化が食い違うケースがあり、どちらか一方だけでは判断を誤る。
+  - **Deposit, glycogen(GT・目視とも改善)**: クエリ図版の網目状・空胞状の
+    グリコーゲン沈着パターンに対し、macenko単独(sim 0.70〜0.73)・
+    macenko+線形補正(sim 0.75、より高い類似度)とも視覚的に妥当な一致だが、
+    補正併用側の方が空胞がより明瞭——数値・目視とも一貫して改善する数少ない
+    実例。
+  - **Hematopoiesis, extramedullary(GT数値は改善、ギャラリーは0→0で消失)**:
+    クエリ図版は矢印で示された濃染性造血細胞集塊。**macenko単独のギャラリー
+    (sim 0.70〜0.79相当)を実際に見たところ、20枚全てがピンボケ気味の一様な
+    ピンク組織で、造血細胞集塊は1枚も写っていなかった**——類似度スコアは
+    それなりに高くても、視覚的には元々偽陽性だった。線形補正でこのギャラリーが
+    消えたのは「本物を失った」のではなく「元々間違っていたものが消えただけ」で、
+    この所見は手法によらず一貫して機能しない(README「検索結果の可視化改善と
+    タイル選択バイアスの発見」以来の既知の限界と整合)。
+- **結論**: macenko・whiten・線形補正のいずれも「所見依存で明暗が分かれ、
+  一律適用はできない」という同じ結論が4回目独立に確認された。GT数値だけでも
+  ギャラリー数だけでも判断を誤りうる(Hematopoiesisの事例)——新しい補正案を
+  評価する際は、必ず実際の画像を目視することが不可欠。
+
 ## 次の一手(成果物トラック)
 
 1. **glycogen deliver の137枚(job 9701)を病理知識のある人にレビューしてもらう** —

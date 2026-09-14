@@ -1,0 +1,46 @@
+# ============================================================
+# experiments/0040: atlas→corpus ドメインシフト補正の alpha スイープ
+# ============================================================
+# experiments/0039(alpha=1.0)は否定的だった: GT best_rankが7所見中5所見で
+# 悪化、うち2所見(Proliferation, Kupffer cell / Inclusion body)はGTスライドが
+# 候補プールから完全に消失した。一方でギャラリー数は軒並み増えており、
+# 「補正が強すぎて、正解ではない別のスライドに自信を持って飛びついている」
+# 可能性が疑われる。domain_shiftのノルムは0.6309(単位ベクトル空間でかなり大きい)
+# — 補正の強さ(alpha)を弱めれば、GTスライドを候補プールから追い出すほどの
+# 破壊的な移動を避けつつ、ドメインギャップの緩和効果だけを部分的に得られる
+# のではないかという仮説を検証する。
+#
+# domain_shift ベクトル自体は experiments/0039 で計算済みのものをそのまま
+# 再利用する(同じRNG状態・同じ負例サンプルで比較するため、再計算しない)。
+# alpha を 0.25 / 0.5 / 0.75 でスイープし、GT best_rank比較
+# (scripts.validate_against_ground_truth.run_comparison)で最良のalphaを選ぶ。
+# 最良alphaについてのみ、コーパスGT対応7所見の目視ギャラリー診断
+# (lib.ovr_scoring.run_query_arm)を追加実行し、GT数値だけで採否判断しない
+# (README「experiments/0037」以降の教訓)。
+# ============================================================
+
+seed: 42
+
+gt_csv: "data/processed_csv/single_finding_liver.csv"
+
+index_dir: "outputs/0018_20260909_build_faiss_index_deblank/default"
+features_dir: "data/trident_processed/20x_224px_0px_overlap/features_uni_v1"
+
+atlas_root: "data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver"
+atlas_figures_csv: "data/query/nnl_liver_atlas_figures.csv"
+
+tile_size: 224
+
+# experiments/0039 が保存した domain_shift.npy をそのまま再利用する
+domain_shift_path: "outputs/0039_20260914_atlas_domain_shift_correction/default/domain_shift.npy"
+alphas: [0.25, 0.5, 0.75]
+
+# --- 最良alphaの目視ギャラリー診断(experiments/0039と揃える) ---
+raw_slide_dir: "data/moo_collected_tggate_wsi/raw_wsi"
+baseline_thumbnails_dir: "data/trident_processed/thumbnails"
+nprobe: 32
+rerank_pool: 200
+max_tiles_reranked: null
+k_candidates: 8000
+top_n_slides: 20
+top_n_slides_to_plot: 3

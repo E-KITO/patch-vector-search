@@ -1,0 +1,53 @@
+# ============================================================
+# experiments/0039: atlas→corpus ドメインギャップの線形補正(平均シフト)を
+# GT best_rank + 目視の両方で検証する
+# ============================================================
+# experiments/0038で、atlas図版のタイル(25所見・4891枚)とコーパスのランダム
+# パッチが、所見ラベルを無視した二値分類器でLOFO/LOIO AUROC=1.0と完璧に分離
+# でき、かつコーパスGTパッチとatlas図版のドメインスコア差が所見によらずほぼ
+# 一定(10.0〜11.7)だったことから、単一の支配的な「atlasらしさ」方向による
+# 線形なドメインギャップだという仮説が立った。
+#
+# この実験はその仮説に基づき、最も単純な線形補正——atlas図版タイルの平均埋め込み
+# からコーパスのランダムパッチの平均埋め込みを引いた「domain_shift」ベクトルを、
+# 個々のatlasクエリ埋め込みから差し引いてから索引検索する——を試す。索引・コーパス
+# 側は一切変更しない(baseline 0018のまま)、クエリ埋め込みベクトルへの後処理のみ
+# なので、Macenko/whitenと違い別コーパスの再構築が不要で最も軽量な補正案。
+#
+# 検証は scripts.validate_against_ground_truth.run_comparison を使った GT
+# best_rank 比較(baseline_v1 vs domain_corrected、7所見)と、コーパスGT対応
+# 7所見の目視ギャラリー診断(lib.ovr_scoring.run_query_arm、experiments/0013・
+# 0030・0034と同じ枠組み)の両方で行う——GT数値だけで採否判断しない
+# (README「experiments/0037」以降の教訓)。
+#
+# 注意(leakage caveat): domain_shift は25所見全ての図版をプールして計算する
+# ため、GT検証対象7所見それぞれの図版も(全体の2〜11%程度)domain_shift自体の
+# 計算に混入している。leave-one-finding-out版ではない——完全に独立な検証では
+# ない点に留意(詳細はREADME参照)。
+# ============================================================
+
+seed: 42
+
+gt_csv: "data/processed_csv/single_finding_liver.csv"
+
+index_dir: "outputs/0018_20260909_build_faiss_index_deblank/default"
+features_dir: "data/trident_processed/20x_224px_0px_overlap/features_uni_v1"
+
+atlas_root: "data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver"
+atlas_figures_csv: "data/query/nnl_liver_atlas_figures.csv"
+
+tile_size: 224
+
+# --- domain_shift 計算(experiments/0038と同一のレシピ) ---
+n_negative_patches: 8000
+alpha: 1.0
+
+# --- 目視ギャラリー診断(experiments/0034と揃える) ---
+raw_slide_dir: "data/moo_collected_tggate_wsi/raw_wsi"
+baseline_thumbnails_dir: "data/trident_processed/thumbnails"
+nprobe: 32
+rerank_pool: 200
+max_tiles_reranked: null
+k_candidates: 8000
+top_n_slides: 20
+top_n_slides_to_plot: 3
