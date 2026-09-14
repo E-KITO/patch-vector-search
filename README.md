@@ -1979,6 +1979,57 @@ LOSOから、atlas図版単位のleave-one-image-out(LOIO、「同じ所見の�
   進めるなら、LOIOに代わる検証指標(例: atlas図版を国別・撮影条件別に分けたLOIOや、
   少数でも良いので新規18所見の一部にコーパスGTを人手で追加する)が必要。
 
+## experiments/0038: atlas vs corpus ドメインギャップの直接定量化(2026-09-14、job 10671)
+
+experiments/0037で、所見ラベル別のOvR分類器のLOIO AUROCがHypertrophyを含む25所見
+全てでほぼ1.0に飽和した。これが「所見を学習できているから」ではなく、正例(atlas
+由来)と負例(corpus由来)がそもそも画像ドメインとして分離しやすいせいではないか、
+という仮説をこの実験で直接検証した。所見ラベルを完全に無視し、NNLアトラス25所見
+全ての図版タイル(4891枚)を「atlas」クラス、コーパスからのランダムパッチ8000枚を
+「corpus」クラスとして単一のロジスティック回帰分類器(`lib.ovr_scoring.train_logreg`
+をそのまま流用)を学習し、leave-one-finding-out(LOFO、25fold)と
+leave-one-image-out(LOIO、87図版プール)で評価した。
+
+- **結果: 仮説を強く裏付ける、ほぼ完璧な分離**。LOFO AUROC・LOIO AUROCとも
+  **median=min=max=1.0**(それぞれ25fold・87fold全て)。**未見の所見の図版でも、
+  他の24所見の図版だけを学習に使って完璧に「atlasかcorpusか」判定できる**——
+  所見の中身を一切見ずに、画像ドメインだけで完全分離できるということであり、
+  0037の全所見一律1.0が「所見学習ではなくドメイン分離を拾っていただけ」だった
+  ことの直接的な裏付けになった。最終分類器で4891枚のatlasタイル全てを再スコア
+  しても corpus 側に誤分類されたのは **0枚**(`frac_scored_as_corpus`が全25所見で
+  0.0、`domain_scores_by_finding.csv`)。
+- **決定的な追加証拠: 同じ所見でもコーパスGTパッチとatlas図版でドメインスコアが
+  正反対に振れる**。コーパスGTが確定している7所見全てで、本物のTG-GATEs由来GT
+  パッチ(コーパス側負例プールの平均-5.72とほぼ同じ位置)とatlas図版のドメイン
+  スコアを比較したところ(`gt_patch_domain_scores.csv`):
+
+  | 所見 | GTパッチ平均 | atlas図版平均 | 差 |
+  |---|---|---|---|
+  | Hypertrophy | -5.36 | +5.35 | 10.71 |
+  | Single cell necrosis | -5.32 | +5.27 | 10.59 |
+  | Increased mitosis | -6.10 | +3.95 | 10.05 |
+  | Deposit, glycogen | -5.64 | +5.88 | 11.51 |
+  | Hematopoiesis, extramedullary | -5.06 | +6.46 | 11.51 |
+  | Proliferation, Kupffer cell | -5.29 | +6.37 | 11.67 |
+  | Inclusion body, intracytoplasmic | -5.10 | +4.96 | 10.06 |
+
+  差が**所見によらずほぼ一定(10.0〜11.7)**であることが重要——所見ごとに異なる
+  複雑な歪みではなく、単一の支配的な「atlasらしさ」方向がドメインギャップの
+  正体であることを示唆する。コーパスGTパッチは所見の内容に関わらずcorpus負例
+  プールとほぼ同じ位置に収まっており、この分類器にとって所見の中身はほぼ無関係。
+- **所見フォルダ間でもドメインスコアの強さに幅がある**(`domain_scores_by_finding.csv`、
+  最低は Bile Duct Hyperplasia の mean 3.16、最高は Pigment の mean 6.91)が、
+  最低のケースでもcorpus側(-5.72)から10近く離れており、どの所見のatlas図版も
+  疑いなく「atlas側」に分類される。
+- **解釈**: 検索結果を歪めているのは所見の内容ではなく画像ドメインそのもの、という
+  仮説がほぼ確定的に裏付けられた。かつ差がほぼ一定であることから、**線形補正
+  (CORAL的な平均・分散のドメイン間アライメント)で大部分を吸収できる可能性が
+  高い**——次の一手として、この分類器の重みベクトル方向(またはatlas/corpus
+  各ドメインの平均差ベクトル)をatlas埋め込みから差し引く簡易補正を試し、
+  `scripts/validate_against_ground_truth.py`のGT best_rankで効果をA/B検証する
+  ことが自然な続き(experiments/0025の白色化と同様、必ずGT/目視の両方で検証
+  してから採否判断すること——README「experiments/0037」以降の教訓)。
+
 ## 次の一手(成果物トラック)
 
 1. **glycogen deliver の137枚(job 9701)を病理知識のある人にレビューしてもらう** —

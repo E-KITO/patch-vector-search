@@ -1,0 +1,38 @@
+# ============================================================
+# experiments/0038: Atlas図版 vs TG-GATEsコーパスの「ドメインギャップ」を
+# 所見ラベル非依存の二値分類器で直接定量化する
+# ============================================================
+# 背景(README「experiments/0037」参照): atlas図版のタイルを正例、コーパスの
+# ランダムパッチを負例にした所見別OvR分類器のLOIO AUROCが、Hypertrophyを含む
+# 25所見全てでほぼ1.0に飽和した。所見を学習できているからではなく、正例
+# (atlas由来)と負例(corpus由来)がそもそも画像ドメインとして分離しやすいせい
+# ではないか、という仮説をこの実験で直接検証する。
+#
+# 所見ラベルを無視し、NNLアトラス25所見全ての図版タイルを「atlas」クラス、
+# コーパスのランダムパッチを「corpus」クラスとして単一のロジスティック回帰
+# 分類器を学習する。検証はLOFO(leave-one-finding-out、25fold、所見に依存しない
+# 汎用的な「atlasらしさ」信号の有無を見る)とLOIO(leave-one-image-out、91図版
+# 全体プール、experiments/0037と同じ枠組みを所見横断で再利用)の2種類。
+#
+# 加えて、コーパスGTが確定している所見については、その所見のコーパス内GT
+# スライドのパッチ(atlas図版ではなく本物のTG-GATEs由来の陽性パッチ)をこの
+# ドメイン分類器でスコアし、atlas図版側のスコア分布と比較する。
+# ============================================================
+
+seed: 42
+
+gt_csv: "data/processed_csv/single_finding_liver.csv"
+
+index_dir: "outputs/0018_20260909_build_faiss_index_deblank/default"
+features_dir: "data/trident_processed/20x_224px_0px_overlap/features_uni_v1"
+
+atlas_root: "data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver"
+atlas_figures_csv: "data/query/nnl_liver_atlas_figures.csv"
+
+tile_size: 224
+
+# --- 分類器の学習データ(experiments/0035-0037と揃える) ---
+max_positive_patches_per_slide: 300
+n_negative_patches: 8000
+neg_test_fraction: 0.2
+classifier_C: 1.0
