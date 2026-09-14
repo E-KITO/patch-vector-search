@@ -2211,6 +2211,20 @@ JPEG圧縮・ダウンサンプリング時の画素混合が、現行パイプ�
 必要。このセッションでできるのは、変更仕様(何を・なぜ変えるか、
 experiments/0043・0044の根拠付き)を明文化し、引き継ぎ可能な形にすることまで。
 
+**2026-09-14 追記(依頼→実装完了、実行待ち)**: wsi_preprocess側のエージェントに
+上記の変更(染色ベクトル推定をパッチ単位→スライド単位fitに)を依頼したところ、
+`src/stain_norm.py::MacenkoStainNormalizer.fit_slide()`(スライドの代表パッチ
+20枚をseed=42で抽出・連結し1回だけfit、以降そのスライドの全パッチはこの固定
+HEで濃度計算)として実装済みとの返答を受けた(詳細は先方の
+`docs/uni_v1_macenko_slide_fit.md`)。基準パッチ・224pxジオメトリ・uni_v1
+エンコーダは無変更、出力先は既存の`trident_processed_uni_v1_macenko`
+(パッチ単位fit版、GT比較用に保持)を上書きせず、新規に
+`trident_processed_uni_v1_macenko_slidefit`へ分離。実行(全コーパス再構築の
+sbatch投入)はwsi_preprocess側もホスト側人間の投入が必要な制約は同じで、
+smoke test→本番投入→自己一致性テスト→Macenko失敗パッチ監査、という既存と
+同じゲートを通す予定。features_dirが揃い自己一致性テストがPASSしたら
+連絡が来る想定——**この時点ではまだコーパスは出来ていない(実行待ち)**。
+
 ## 次の一手(成果物トラック)
 
 1. **glycogen deliver の137枚(job 9701)を病理知識のある人にレビューしてもらう** —
