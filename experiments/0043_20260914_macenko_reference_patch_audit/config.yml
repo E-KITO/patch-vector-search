@@ -1,0 +1,39 @@
+# ============================================================
+# experiments/0043: Macenko染色正規化の基準パッチ選定を見直す
+# ============================================================
+# 現行の基準パッチ(data/baseline/63958_x38976_y7616.png)は
+# scripts/select_average_patch.py が2026-08-19頃に一度だけ選んだもので、選定
+# 基準は「40スライド(コーパスの4%)からサンプルしたUNI**埋め込み**の重心に
+# 最も近いパッチ」だった。これはスクリプト自身のdocstringが認める通り、
+# Macenko正規化が本来見るべき「染色ベクトル(H&E濃度プロファイル)の典型性」
+# を直接測ったものではない(組織の見た目全体を混ぜた埋め込み空間のプロキシ)。
+# 選定に使ったパス(data/raw_wsi)は現存せず、候補リスト(candidates.json)も
+# 残っていない。また背景パッチ除去(experiments/0017/0018)より前の選定。
+#
+# この実験は、色空間(染色ベクトル)そのものを直接見る、より原理に忠実な基準で
+# 選定をやり直す診断ツール: 背景除去済みコーパス(experiments/0018)からランダム
+# サンプルした実パッチについて、torchstainのNumpyMacenkoNormalizerで各パッチ
+# 自身の染色ベクトル(HERef)・最大濃度(maxCRef)を推定し、その中央値(=コーパス
+# 全体の「典型的な染色」)に最も近いパッチを候補として挙げる。現行の基準パッチ
+# 自身もこの分布の中でどの位置にあるか(典型的か外れ値か)を評価する。
+#
+# 注意: これは診断のみで、実際にMacenko索引(experiments/0010/0033、
+# data/trident_processed_uni_v1_macenko)を再構築するものではない
+# (再構築にはwsi_preprocessパイプラインでの全コーパス再正規化が必要で、この
+# セッションのSlurm実験の範囲外)。GPU不要(torchstainのNumpy実装、UNIエンコーダ
+# は呼ばない)。
+# ============================================================
+
+seed: 42
+
+index_dir: "outputs/0018_20260909_build_faiss_index_deblank/default"
+raw_slide_dir: "data/moo_collected_tggate_wsi/raw_wsi"
+
+current_reference_path: "data/baseline/63958_x38976_y7616.png"
+
+n_slides: 150
+n_patches_per_slide: 5
+tile_size: 224
+
+top_k_candidates: 10
+max_candidates_per_slide: 2
