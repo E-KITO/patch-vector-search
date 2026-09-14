@@ -1775,13 +1775,28 @@ whiten/macenko の3択に拡張:
 | Increased mitosis | **macenko** | GT改善(7→1)、whitenとの競合なし |
 | Inclusion body, intracytoplasmic | **macenko** | GT改善幅大(480→97) |
 | Degeneration, fatty | **macenko** | GTなし、experiments/0031の目視診断で妥当性確認 |
-| Necrosis | whiten | 変更なし |
+| Necrosis | whiten(表記のみ、下記参照) | 変更なし |
 | Proliferation, Kupffer cell | whiten | 変更なし(0030で懸念あり、次の一手参照) |
 | 上記以外 | baseline | 保守方針(実測なし/macenko・whitenとも不利) |
 
 macenko ルーティング所見はコーパス自体が別 h5 特徴量群(`MACENKO_FEATURES_DIR`)
 なので、クエリ画像も `query_tile_transform_for_finding` で per-tile Macenko
 正規化してから埋め込む必要がある(`lib/finding_routing.py` 参照)。
+
+**⚠️ 2026-09-14 訂正: 上表の `Necrosis | whiten` は atlas 駆動パイプラインでは
+実際には発動しない。** `lib/finding_routing.py` の `WHITEN_FINDINGS` は
+`"Necrosis"`(コーパスGT n=13 の広いラベル、job 10589 で whiten 有利と確認)を
+キーにしているが、atlas フォルダ `Liver - Necrosis` は
+`scripts.validate_against_ground_truth.CATEGORIES` を通じて常に
+`"Single cell necrosis"`(コーパスGT n=4、上の0028表で **baseline** が正解と
+確認済み)に解決される。両者は文字列として一致しないため、
+experiments/0029/0030/0034/0037 のような atlas 駆動の呼び出しは
+`WHITEN_FINDINGS` にヒットせず **baseline にフォールバックする**
+——これは偶然ながら証拠と整合する挙動(n=4 ラベルでは whiten はむしろ悪化する)
+だが、「Necrosis は whiten」という上表の書き方は実態と食い違うため注意。
+`"Necrosis"` エントリ自体は現状どの呼び出し元からも到達しない(`experiments/0019`
+の `SUPPORTED_FINDINGS` にも未収録)。詳細・今後この経路を使う場合の注意点は
+`lib/finding_routing.py` の `WHITEN_FINDINGS` 直前のコメント参照。
 
 **未解決のまま残っている件**: `Proliferation, Kupffer cell` は whiten ルーティング
 のままだが、experiments/0030 の目視診断で「パッチ単位では所見が視覚的に見えて
