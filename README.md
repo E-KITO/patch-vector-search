@@ -2225,6 +2225,64 @@ smoke test→本番投入→自己一致性テスト→Macenko失敗パッチ監
 同じゲートを通す予定。features_dirが揃い自己一致性テストがPASSしたら
 連絡が来る想定——**この時点ではまだコーパスは出来ていない(実行待ち)**。
 
+**2026-09-16 追記(コーパス完成、GT検証まで完了)**: wsi_preprocess側から
+`trident_processed_uni_v1_macenko_slidefit`(全1000スライド・約1836万パッチ、
+73GB)が納品された。experiments/0049でmanifest構築時点でも1000/1000スライド
+分のh5が揃っていることを確認済み。これを受けた実検索性能でのA/B比較の結果は
+下記「experiments/0049〜0052」参照——**結論としてスライド単位fitへの切替は
+見送り、既存のパッチ単位fitコーパス(`trident_processed_uni_v1_macenko`)を
+本番のまま維持する**。
+
+## experiments/0049〜0052: Macenkoスライド単位fitコーパスの実検索性能A/B検証(パッチ単位vsスライド単位fitの最終判定)(2026-09-16、jobs 10826/10828/10834/10839)
+
+experiments/0043・0044の事前検証(torchstain単体での染色ベクトル安定性比較)で
+「スライド単位fitが正規化ノイズを一定程度減らす中程度の根拠」が得られたことを
+受け、wsi_preprocess側に依頼して全コーパスをスライド単位fitで再構築した
+(上記「wsi_preprocess連携」)。本セットの4実験で、その新コーパスが実際の
+GT best_rank・目視の両面で既存のパッチ単位fitコーパスを上回るかを検証した。
+
+- **experiments/0049**: 新コーパス(`features_uni_v1_macenko_slidefit`)に
+  experiments/0032と同じ背景除去(`sat_frac < 0.10`)を適用してmanifestを構築。
+  1000/1000スライド・17,981,963パッチ(背景386,372枚除外後)。12スライドは
+  背景blankness側のパッチ数とわずかにずれたため、該当スライドのみ背景除外を
+  スキップ(0032と同じ安全側フォールバック)。
+- **experiments/0050**: 0049のmanifestからFAISS索引を構築(GPU、既存
+  `experiments/0033`のMacenko索引作成ロジックをそのまま流用)。
+- **experiments/0051**: 本題のGT best_rank比較。`macenko_patchfit`
+  (既存、experiments/0033・本番採用中)と`macenko_slidefit`(新規、
+  experiments/0050)の2索引を、クエリ側埋め込み(atlas図版へのtorchstain
+  正規化・macenkoタイル埋め込み)は完全に同一に統制した上で、GT対応7所見
+  全部について比較した:
+
+  | 所見 | patchfit found | patchfit best | slidefit found | slidefit best |
+  |---|---|---|---|---|
+  | Hypertrophy | 25/25 | 18 | 25/25 | 35 |
+  | Single cell necrosis | 4/4 | 85 | 4/4 | 69 |
+  | Increased mitosis | 10/10 | 1 | 9/10 | 2 |
+  | Deposit, glycogen | 6/6 | 14 | 6/6 | 22 |
+  | Hematopoiesis, extramedullary | 3/3 | 83 | 3/3 | 51 |
+  | Proliferation, Kupffer cell | 1/2 | 873 | **0/2** | — |
+  | Inclusion body, intracytoplasmic | 1/1 | 52 | 1/1 | 15 |
+
+  改善は3所見(Single cell necrosis、Hematopoiesis, extramedullary、
+  Inclusion body, intracytoplasmic)、悪化は2所見(Hypertrophy、
+  Deposit, glycogen)。決定打は**Proliferation, Kupffer cell**で、
+  slidefitに切り替えるとGTスライド2枚のうち1枚が候補プールから完全に
+  消失した(found 1/2→0/2)。Increased mitosisも found が10/10→9/10へ
+  1枚脱落している。**verdict: REGRESSED(GTスライドが候補プールから
+  消失する所見があり、slidefitへの切替は非推奨)**。
+- **experiments/0052**: GT対応7所見全部で目視ギャラリー診断(top5比較)を
+  追加実施。全所見でtop5の顔ぶれが変わり(`top_slides_changed: True`)、
+  ギャラリー生成数もmacenko_patchfit側が総じて多い(例: Deposit, glycogen
+  2枚→0枚、Hematopoiesis 1枚→0枚)。0051のGT数値と整合する結果で、
+  「slidefitが視覚的にも優れている」という裏付けは得られなかった。
+- **結論**: experiments/0043・0044の事前検証で示唆された「スライド単位fitで
+  正規化ノイズが減る」という仮説は、実際のGT検索性能では裏付けられなかった。
+  むしろKupffer cellのようにGTスライド自体が候補プールから消える所見がある
+  ため、**パッチ単位fit(既存`trident_processed_uni_v1_macenko`)を本番のまま
+  維持する**。`trident_processed_uni_v1_macenko_slidefit`コーパス・索引は
+  この検証記録として保持するが、`lib.finding_routing`等の本番経路は変更しない。
+
 ## 次の一手(成果物トラック)
 
 1. **glycogen deliver の137枚(job 9701)を病理知識のある人にレビューしてもらう** —
