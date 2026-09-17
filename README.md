@@ -2331,6 +2331,56 @@ GT best_rank・目視の両面で既存のパッチ単位fitコーパスを上�
   上記の通り3割強は主要因と呼べる水準ではなく、この閾値は参考程度に留める
   こと(人間の解釈では「無視できない一因、主犯ではない」が正確)。
 
+## experiments/0054: JPEG-shift補正ベクトルの構築とGT対応7所見でのalphaスイープ検証(2026-09-17、job 10880)
+
+experiments/0053で切り分けた「JPEG圧縮だけの差ベクトル」は、experiments/0039・
+0041のdomain_shift(atlas平均-corpus平均、生物学的要因とJPEG要因が混在)より
+純粋な補正ベクトルになっているはず、という仮説(ユーザー提案)を検証した。
+atlas図版91枚の量子化テーブルから実際のJPEG品質を推定して較正し、その品質で
+jpeg_shiftベクトルを構築、finding_routingの実ルーティング空間(plain/whiten/
+macenko)でGT対応7所見のalphaスイープ(experiments/0045と同じ枠組み)を行った。
+domain_shift-jpeg_shiftの残差ベクトルについても粗いグリッドで検証した。
+
+- **atlas実測品質は87/87件が推定上限の100(ほぼロスレス)**——experiments/0053で
+  試した品質50(最悪ケース)とは大きく異なり、実際のatlas画像はかなり高品質な
+  JPEGだった。
+- **較正後のjpeg_shiftの大きさはdomain_shiftの22〜31%**(plain空間ノルム比
+  0.197/0.631=31%、macenko空間0.140/0.629=22%)——無視できるほど小さくはない。
+- **しかし品質間の方向一貫性に問題がある**: 近い品質同士(Q50 vs Q70、Q95 vs
+  Q100)はコサイン類似度0.80〜0.97で方向が揃うが、遠い品質同士(**Q50 vs
+  Q100はplain 0.326・macenko 0.449**)では方向が大きく変わる。experiments/0053
+  で得た品質50相当のシフト方向と、実際のatlas画像(品質100)のシフト方向は
+  別方向を向いており、「単一方向をalphaでスケールする」線形補正の前提
+  (domain_shiftが所見によらずほぼ一定方向だったのと同種の前提)が、jpeg_shift
+  については品質を跨ぐと崩れる。
+- **GT対応7所見での効果**:
+  - jpeg_shift単独: 7所見中5所見でbest_alpha=0.0(効果ゼロ)。Kupffer cellのみ
+    alpha=0.1でrank 72→71のごくわずかな改善。
+  - 残差(domain_shift-jpeg_shift) vs domain_shift単独(experiments/0045):
+
+    | 所見 | domain_shift単独(0045) | residual(0054) |
+    |---|---|---|
+    | Single cell necrosis | alpha=0.5, Δ=-11 | alpha=0.5, Δ=-12 |
+    | Deposit, glycogen | alpha=0.5, Δ=-2 | alpha=0.5, Δ=-1 |
+    | Hematopoiesis | alpha=0.2, Δ=-7 | alpha=0.25, Δ=-7 |
+    | Proliferation, Kupffer cell | alpha=0.35, Δ=-21 | **alpha=1.0, Δ=-29** |
+    | Hypertrophy | alpha=0.1, Δ=-7 | **alpha=0.0, Δ=0** |
+    | Increased mitosis | alpha=0.0, Δ=0 | alpha=0.0, Δ=0 |
+    | Inclusion body | alpha=0.25, Δ=-11 | alpha=0.25, Δ=-11 |
+
+    Kupffer cellは明確に改善(alpha=1.0が探索範囲の上限なのでさらに伸びる余地
+    あり)、Hypertrophyはdomain_shiftが持っていた改善効果が完全に消失、
+    残り4所見はほぼ同等。
+- **結論**: JPEG-shift単独の補正は実用的価値が無い(較正品質がほぼロスレスの
+  ため、シフト自体が弱く方向も不安定)。残差(domain_shift-jpeg_shift)は
+  domain_shift単独に対して一貫した優位性が無く、所見依存で明暗が分かれる
+  (Kupffer cellには効くがHypertrophyには逆効果)——「線形補正は所見依存で
+  明暗が分かれ一律適用はできない」というこのプロジェクトの繰り返しの教訓
+  (experiments/0037・0039・0040・0041)が、JPEG成分を除いた残差補正でも同様に
+  成立した。**domain_shiftを残差に置き換える理由は無い**。Kupffer cell
+  (whiten空間)限定でalpha=1.0超の残差補正を追試する価値はある程度の知見に
+  留まる。
+
 ## 次の一手(成果物トラック)
 
 1. **glycogen deliver の137枚(job 9701)を病理知識のある人にレビューしてもらう** —
