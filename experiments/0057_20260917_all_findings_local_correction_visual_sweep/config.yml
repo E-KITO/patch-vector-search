@@ -1,0 +1,48 @@
+# ============================================================
+# experiments/0057(フェーズB): GTの無い18所見について、局所k近傍補正を
+# 3空間(plain/whiten/macenko)×alpha2点で実ギャラリー生成し目視判断する
+# ============================================================
+# 背景: experiments/0056(フェーズA)で、局所k近傍補正の効果を画像生成なしの
+# 数値指標(top3_mean_max_similarity)でスクリーニングしようとしたが、alphaを
+# 上げるほど全所見・全空間で一様に類似度が単調上昇するという結果になった。
+# 調べたところ、これは局所補正の仕組み上ほぼ同語反復的なアーティファクト
+# (クエリを自分自身が引いた近傍corpusパッチの重心に寄せているだけなので、
+# その近傍への類似度が上がるのは当然)であり、所見が見えやすくなったことの
+# 裏付けにはならないと判明した(experiments/0039のalpha=1.0ギャラリー急増が
+# 見せかけだったのと同種の失敗モード)。
+#
+# 数値だけでの自動選別は使えないと分かったため、experiments/0046の方針
+# (18所見を粗い格子で網羅し、実際に目視で判断する)に戻す。ただし0046は
+# finding_routingが決めた単一空間だけを見ていたのに対し、この実験は
+# 3空間全部を対象所見ごとに生成し、「現行の既定(plain)以外の空間の方が
+# 良く見えるか」も含めて比較できるようにする。alphaは0.0(補正なし)と0.3
+# (experiments/0055でGT対応7所見の多くが改善を示した中程度の強さ)の2点に
+# 絞り、18所見×3空間×2alpha=108アームに抑える。
+#
+# atlasプール・corpusプール・局所補正のロジックはexperiments/0055・0056と同一。
+#
+# 出力(outputs/0057_.../default/):
+#   target_findings.csv                        対象18所見一覧
+#   <finding_slug>/query__<space>_alpha<a>/...  空間・alpha候補ごとのギャラリー
+#   summary.csv                                 所見・空間・alpha候補ごとのギャラリー数比較
+# ============================================================
+
+seed: 42
+
+atlas_root: "data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver"
+atlas_figures_csv: "data/query/nnl_liver_atlas_figures.csv"
+
+tile_size: 224
+k_neighbors: 50
+n_corpus_pool: 30000
+
+alphas: [0.0, 0.3]
+
+raw_slide_dir: "data/moo_collected_tggate_wsi/raw_wsi"
+baseline_thumbnails_dir: "data/trident_processed/thumbnails"
+nprobe: 32
+rerank_pool: 200
+max_tiles_reranked: null
+k_candidates: 8000
+top_n_slides: 20
+top_n_slides_to_plot: 3
