@@ -1,0 +1,35 @@
+# ============================================================
+# experiments/0049: wsi_preprocess側が新規再構築した「スライド単位fit」の
+# Macenkoコーパス(features_uni_v1_macenko_slidefit)に、experiments/0032と
+# 同じ背景除去(corpus_blankness.parquet、sat_frac<0.10)を適用したmanifest。
+# ============================================================
+# 発端: experiments/0043・0044の事前検証(パッチ単位fit vs スライド単位fitの
+# 染色ベクトル安定性比較、torchstain+lib.raw_patchのみの小規模実験)で
+# 「スライド単位fitが正規化ノイズを一定程度減らす中程度の根拠」が見つかり、
+# ユーザーの意向によりwsi_preprocess側のエージェントに全コーパス再構築を依頼した
+# (README「wsi_preprocess連携」参照)。基準パッチ・224pxジオメトリ・uni_v1
+# エンコーダは既存Macenkoコーパス(experiments/0032/0033)と無変更、染色ベクトル
+# 推定だけがパッチ単位fit→スライド単位fit(スライド代表20パッチをseed=42で
+# 連結し1回だけfit)に変わっている。
+#
+# この実験は experiments/0032 のコピー(ロジック変更なし) — features_dir だけ
+# 新しいスライド単位fitコーパスを指す。背景blankness測定は生WSIピクセルの
+# sat_fracなので染色正規化方式に依存せず、0032と同じ corpus_blankness.parquet
+# をそのまま流用できる(0032のdocstring参照)。ただしこのコーパスは
+# wsi_preprocess側の独立抽出のため、0032同様パッチ数がわずかにずれるスライドが
+# あり得る — その場合は experiment.py の _adjust_blankness_for_corpus が
+# 該当スライドだけ背景除外をスキップして安全側に倒す(0032と同一ロジック)。
+#
+# 前提: features_dir配下に1000/1000枚のh5が揃っていること
+# (2026-09-16時点ではまだ997/1000、欠落3枚の再処理待ち — README
+# 「wsi_preprocess連携」参照)。揃う前に実行すると、欠落分のスライドが
+# manifestから単純に抜け落ちる(fail-fastはしない)ため、必ず1000/1000を
+# 確認してから投入すること。
+# ============================================================
+
+seed: 42
+features_dir: "data/trident_processed_uni_v1_macenko_slidefit/20x_224px_0px_overlap/features_uni_v1_macenko_slidefit"
+train_sample_size: 500000
+
+background_blankness_path: "outputs/measure_corpus_blankness/corpus_blankness.parquet"
+background_sat_frac_max: 0.10

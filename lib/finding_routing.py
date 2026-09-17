@@ -46,6 +46,21 @@ MACENKO_STAIN_REFERENCE = Path("data/baseline/63958_x38976_y7616.png")
 # experiments/0027/0028 の atlas 図版単位診断(GT実測)で whiten が net で優位と
 # 確認された所見。Hypertrophy と Inclusion body はここには含めない(macenko の
 # 方がGT改善幅が大きく、そちらを採用したため — 下記 MACENKO_FINDINGS 参照)。
+#
+# ⚠️ "Necrosis"(コーパスGT n=13の広いラベル)と "Single cell necrosis"
+# (atlas フォルダ "Liver - Necrosis" が scripts.validate_against_ground_truth.
+# CATEGORIES を通じて実際に解決される先、コーパスGT n=4)は、single_finding_liver.csv
+# 上で別々の FINDING_TYPE 値であり、evidence も逆方向(README「追加検証: 単純表記
+# 「Necrosis」で評価すると結論が逆転する」参照——n=13では whiten で median
+# best_rank 136→115.5 改善、n=4では 29→104 悪化)。CATEGORIES 経由の atlas 駆動
+# パイプライン(experiments/0029/0030/0034/0037等)は常に "Single cell necrosis"
+# を渡すため WHITEN_FINDINGS の "Necrosis" には一致せず baseline に落ちる
+# ——これは意図した挙動(n=4 の実測では whiten が悪化するため baseline が正しい)。
+# "Necrosis" のエントリは、現状どの呼び出し元(grep 済み: experiments/0019 の
+# SUPPORTED_FINDINGS にも無い)からも到達しない。将来 bare "Necrosis" ラベルを
+# 直接クエリする経路(例: 0019 の SUPPORTED_FINDINGS 拡張)を追加する場合のための
+# 予約——安易に "Single cell necrosis" へキー名を変更しないこと(それは逆に
+# 悪化が確認されている経路を有効化してしまう)。
 WHITEN_FINDINGS = frozenset({
     "Necrosis",
     "Proliferation, Kupffer cell",

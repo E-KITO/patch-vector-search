@@ -1,0 +1,49 @@
+# ============================================================
+# experiments/0041: Macenko + 線形ドメイン補正を「両方とも」全25所見に適用し、
+# 目視で改善を確認する
+# ============================================================
+# これまでの検証:
+#   - macenko(per-tile染色正規化 + 別コーパス索引): GT対応7所見中3所見
+#     (Hypertrophy/Increased mitosis/Inclusion body)+Fatty Changeで有利と確認済み
+#     (README「experiments/0031」、lib.finding_routing.MACENKO_FINDINGS)。
+#   - 線形ドメイン補正(atlas図版平均-コーパス平均のシフト、alpha=0.25):
+#     GT対応7所見中4所見(Hypertrophy/Necrosis/Increased mitosis/Hematopoiesis)
+#     で改善(README「experiments/0039・0040」)。
+# どちらも「baseline(plain)コーパス・埋め込み空間」を基準に個別検証したもので、
+# 両方を重ねた場合の効果は未検証。またGTが無い18所見はそもそもどちらの補正も
+# 未評価。
+#
+# この実験は、macenko空間(macenko per-tile正規化クエリ + macenko索引)を基準に
+# ドメイン補正を再計算し(macenko空間はplain空間と埋め込み分布が異なるため、
+# experiments/0038/0039のdomain_shiftをそのまま流用しない——交絡を避けるため
+# 独立に計算する)、NNLアトラス全25所見に「macenko単独」vs「macenko+線形補正
+# 併用」の2腕で目視ギャラリー診断を実行する。GT対応7所見については
+# scripts.validate_against_ground_truth.run_comparison によるGT best_rank比較も
+# 追加で行う(おまけ、既存ハーネストの再利用でほぼ無料)。
+#
+# alphaは0.25を流用する(plain空間のスイープ結果、macenko空間で独立に再チューニング
+# はしていない——結果解釈時に留意すること)。
+# ============================================================
+
+seed: 42
+
+gt_csv: "data/processed_csv/single_finding_liver.csv"
+
+atlas_root: "data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver"
+atlas_figures_csv: "data/query/nnl_liver_atlas_figures.csv"
+
+tile_size: 224
+
+# --- macenko空間でのdomain_shift計算 ---
+n_negative_patches: 8000
+alpha: 0.25
+
+# --- 目視ギャラリー診断(experiments/0034/0037と揃える) ---
+raw_slide_dir: "data/moo_collected_tggate_wsi/raw_wsi"
+baseline_thumbnails_dir: "data/trident_processed/thumbnails"
+nprobe: 32
+rerank_pool: 200
+max_tiles_reranked: null
+k_candidates: 8000
+top_n_slides: 20
+top_n_slides_to_plot: 3

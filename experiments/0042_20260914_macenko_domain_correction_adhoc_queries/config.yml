@@ -1,0 +1,40 @@
+# ============================================================
+# experiments/0042: query_001〜003(NNLアトラス外の単発参照タイル)で
+# Macenko+線形補正併用の検索性能を目視確認する
+# ============================================================
+# experiments/0041はNNLアトラス25所見(図版まるごと)を対象にMacenko単独と
+# Macenko+線形補正併用を比較した。この実験は同じ2腕(+参考としてbaseline)を、
+# atlasのCATEGORIES/所見ラベルに属さない単発の参照画像
+# (data/query/query_001〜003.png、experiments/0003以来使われてきたアドホックな
+# クエリタイル)に適用し、目視で検索性能を確認する。所見ラベルが無いため
+# lib.finding_routing の所見別ルーティングは経由せず、3腕(baseline/macenko/
+# macenko_domain_corrected)を常に並列実行する。
+#
+# domain_shift はexperiments/0041が計算したmacenko空間のものをそのまま再利用
+# する(再計算しない)。alpha=0.25もexperiments/0040のスイープ結果を踏襲。
+# ============================================================
+
+seed: 42
+
+query_images:
+  - "data/query/query_001.png"
+  - "data/query/query_002.png"
+  - "data/query/query_003.png"
+
+baseline_index_dir: "outputs/0018_20260909_build_faiss_index_deblank/default"
+baseline_features_dir: "data/trident_processed/20x_224px_0px_overlap/features_uni_v1"
+
+domain_shift_macenko_path: "outputs/0041_20260914_macenko_domain_correction_all_findings/default/domain_shift_macenko.npy"
+alpha: 0.25
+
+tile_size: 224
+
+# --- 目視ギャラリー診断(experiments/0034/0037/0041と揃える) ---
+raw_slide_dir: "data/moo_collected_tggate_wsi/raw_wsi"
+baseline_thumbnails_dir: "data/trident_processed/thumbnails"
+nprobe: 32
+rerank_pool: 200
+max_tiles_reranked: null
+k_candidates: 8000
+top_n_slides: 20
+top_n_slides_to_plot: 3

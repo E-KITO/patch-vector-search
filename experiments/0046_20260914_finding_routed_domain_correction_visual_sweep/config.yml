@@ -1,0 +1,60 @@
+# ============================================================
+# experiments/0046: GTの無い18所見について、finding_routingの実ルーティング
+# 空間で複数alpha候補のギャラリーを生成する(目視によるalpha個別選定の準備)
+# ============================================================
+# experiments/0045はGT対応7所見について、所見ごとに既にルーティングされている
+# 空間(plain/whiten/macenko)でalphaを細かくGT best_rankでチューニングする。
+# 一方、NNLアトラス25所見のうち残り18所見(コーパスGTが無い)は数値評価が
+# できないため、目視でしかalphaを判断できない(README「評価に使ったデータと
+# その限界」の19カテゴリと同じ制約、experiments/0037/0041も同様の前提)。
+#
+# この実験は18所見それぞれについて、no_correction(alpha=0)と複数のalpha候補
+# (下記alphas)でギャラリーを生成するところまでを行う——alpha候補自体の目視
+# 判断・採否は別途(この実験の出力を見てから)行う。
+#
+# 対象所見の空間振り分けはlib.finding_routingと同じ基準:
+#   - Liver - Fatty Change(finding_type "Degeneration, fatty",
+#     extra_atlas_folders参照)は MACENKO_FINDINGS に該当 -> macenko空間
+#   - 残り17所見はコーパス側finding_typeへの対応付けが無く(atlas 25所見中
+#     GT7 + Fatty Change の8つ以外はCATEGORIESに未登録)、finding_routingの
+#     既定であるbaselineへ倒れる -> plain空間
+#   - WHITEN_FINDINGSで実際に到達可能なのは"Proliferation, Kupffer cell"の
+#     みだが、これはGT対応7所見(Kupffer)に含まれるためこの18所見には
+#     含まれない——whiten分岐はコードには残すが、この実験では発火しない
+#
+# domain_shiftはexperiments/0045と同じものを再利用する(plain空間は
+# experiments/0039、macenko空間はexperiments/0041の成果物、再計算しない)。
+#
+# alpha候補はexperiments/0045の定量グリッドと同一(0.0〜0.5を0.05刻み、11点)
+# にした(ユーザー指示、2026-09-14)——目視比較の解像度を優先し、0045の
+# GT best_rankカーブと直接見比べられるようにする。0.0は補正なし相当として
+# 含めており、別途no_correctionアームは設けない。18所見x11アーム=198実行と
+# コストは増えるが、目視のみで判断する18所見の性質上、粗い格子で見落とすより
+# 安全側を取る。
+# ============================================================
+
+seed: 42
+
+atlas_root: "data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver"
+atlas_figures_csv: "data/query/nnl_liver_atlas_figures.csv"
+
+# Fatty ChangeにはコーパスGTが無くCATEGORIESに未登録のため、macenkoルーティング
+# 判定用にfinding_typeを補う(experiments/0034と同一エントリ)。
+extra_atlas_folders:
+  "Liver - Fatty Change - Nonneoplastic Lesion Atlas": "Degeneration, fatty"
+
+tile_size: 224
+
+domain_shift_plain_path: "outputs/0039_20260914_atlas_domain_shift_correction/default/domain_shift.npy"
+domain_shift_macenko_path: "outputs/0041_20260914_macenko_domain_correction_all_findings/default/domain_shift_macenko.npy"
+
+alphas: [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5]
+
+raw_slide_dir: "data/moo_collected_tggate_wsi/raw_wsi"
+baseline_thumbnails_dir: "data/trident_processed/thumbnails"
+nprobe: 32
+rerank_pool: 200
+max_tiles_reranked: null
+k_candidates: 8000
+top_n_slides: 20
+top_n_slides_to_plot: 3

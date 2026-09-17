@@ -1,0 +1,22 @@
+# ============================================================
+# experiments/0050: experiments/0033(既存Macenko索引、パッチ単位fit)と全く
+# 同じハイパラで、スライド単位fitコーパスのmanifest(experiments/0049)から
+# FAISS索引を再構築する。
+# ============================================================
+# ハイパラは0012/0018/0033と完全一致(nlist=4096, pq_m=64, pq_nbits=8,
+# opq_niter=10, seed=42) — 変わるのはmanifest_exp_dir/features_dirのみ。
+# experiments/0049が先に完了している必要がある。
+#
+# この索引の使い道はexperiments/0051(GT best_rankでパッチ単位fitと比較する
+# 最終判定)——ここで作るのは「比較対象の候補」であり、比較の結果によっては
+# lib.finding_routing側への昇格(既存のMACENKO_INDEX_DIRを差し替え)を検討する。
+# ============================================================
+
+seed: 42
+features_dir: "data/trident_processed_uni_v1_macenko_slidefit/20x_224px_0px_overlap/features_uni_v1_macenko_slidefit"
+manifest_exp_dir: "outputs/0049_20260916_build_patch_manifest_macenko_slidefit/default"
+
+nlist: 4096
+pq_m: 64
+pq_nbits: 8
+opq_niter: 10

@@ -1,0 +1,50 @@
+# ============================================================
+# experiments/0047: 空間的な「周囲組織との差分」文脈ベクトルで、
+# GT対応7所見のLOSO AUROC(判別力)がplain単一パッチ埋め込みより改善するか検証
+# ============================================================
+# 発端: Hypertrophyは「周囲の正常肝細胞との対比」で判断される所見であり
+# (README「所見の3クラス分け」)、単一224pxパッチの埋め込みだけでは原理的に
+# 判別しづらいという仮説があった。候補パッチ自身の埋め込みから、同じスライド内で
+# 空間的に隣接する(3x3グリッドの残り8マス)パッチ埋め込みの平均を引いた
+# 差分(contrast)ベクトルを作れば、「周囲と比べてどれだけ違うか」を直接
+# ベクトル化できるはず、というのが元々の提案。
+#
+# ユーザー指摘により対象をHypertrophy単独からGT対応7所見全部に拡張した:
+# 所見は「相対的基準を要する所見(Hypertrophy等、周囲は正常組織→差分が効くはず)」
+# と「パッチ内で完結するテクスチャの所見(glycogen等、既に機能している・かつ
+# 病変が広範囲に連続するため周囲も同じ病変→差分が本物のシグナルまで消して
+# 悪化する懸念)」に分かれるという仮説(README「所見の3クラス分け」)を、
+# この独立した手法で検証できる。
+#
+# 隣接パッチの座標はmanifestのcoord_x/coord_y(level-0ピクセル座標)から
+# スライドごとにグリッド間隔を推定して求める(スライドごとにネイティブ倍率が
+# 異なりうるため224pxを決め打ちしない)。背景除去等で隣接マスが欠けている
+# 場合は存在する隣接のみで平均し、隣接が0枚の候補パッチはスキップする。
+#
+# 新規のUNI埋め込みは一切行わない——既存コーパス(baseline索引0018)のh5特徴量を
+# 読むだけのCPU-onlyジョブ(experiments/0043・0044と同種)。
+#
+# サンプリング設定はexperiments/0035・0036と揃えた(直接比較しやすいように)。
+# 0035はHypertrophyのLOSO AUROC(plain)≈0.59(chance以下)だった。
+# ============================================================
+
+seed: 42
+
+target_findings:
+  - "Hypertrophy"
+  - "Single cell necrosis"
+  - "Increased mitosis"
+  - "Deposit, glycogen"
+  - "Hematopoiesis, extramedullary"
+  - "Proliferation, Kupffer cell"
+  - "Inclusion body, intracytoplasmic"
+
+gt_csv: "data/processed_csv/single_finding_liver.csv"
+manifest_path: "outputs/0018_20260909_build_faiss_index_deblank/default/manifest.parquet"
+features_dir: "data/trident_processed/20x_224px_0px_overlap/features_uni_v1"
+
+# --- サンプリング(experiments/0035・0036と同一) ---
+max_positive_patches_per_slide: 300
+n_negative_patches: 6000
+neg_test_fraction: 0.2
+classifier_C: 1.0
