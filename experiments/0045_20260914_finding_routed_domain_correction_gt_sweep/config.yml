@@ -1,0 +1,48 @@
+# ============================================================
+# experiments/0045: 線形ドメイン補正を finding_routing の実ルーティング空間で
+# GT対応7所見について細かくalphaスイープする
+# ============================================================
+# experiments/0039・0040は常にplain(baseline)索引・埋め込み空間を基準にalphaを
+# 検証していたが、lib.finding_routingは既にHypertrophy/Increased mitosis/
+# Inclusion body -> macenko、Proliferation Kupffer cell -> whiten、残り4所見は
+# baselineへとルーティングしている。この実験は、線形補正を「所見ごとに既に
+# 選ばれている索引・埋め込み空間の上に」追加した場合の効果を、finding_routing
+# と同じ3つの空間(plain/whiten/macenko)ごとに正しくルーティングして検証する。
+#
+# domain_shiftベクトル自体は再計算せず、既存の成果物を再利用する:
+#   - plain空間: experiments/0039のdomain_shift.npy(baseline/whitenの両方で
+#     使う — whiten変換はPatchIndex内部でクエリベクトルに事後適用されるため、
+#     補正はその前段のraw UNI埋め込み空間で行えば良い)
+#   - macenko空間: experiments/0041のdomain_shift_macenko.npy
+#
+# alphaは0.0(補正なし、routed_baseと一致するはずの検算用)〜0.5を0.05刻みで
+# スイープする(experiments/0040の0.25/0.5/0.75より細かい格子)。所見ごとに
+# GTスライドが候補プールから消失しない(found減少なし)ことを最優先し、その中で
+# best_rankの改善が最大のalphaを選ぶ(タイはより小さいalpha=保守的な補正を優先)。
+# 選ばれたalphaについてのみ、目視ギャラリー診断も追加実行する(GT数値だけで
+# 判断しない、README「experiments/0037」「0041」の教訓)。
+# ============================================================
+
+seed: 42
+
+gt_csv: "data/processed_csv/single_finding_liver.csv"
+
+atlas_root: "data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver"
+atlas_figures_csv: "data/query/nnl_liver_atlas_figures.csv"
+
+tile_size: 224
+
+domain_shift_plain_path: "outputs/0039_20260914_atlas_domain_shift_correction/default/domain_shift.npy"
+domain_shift_macenko_path: "outputs/0041_20260914_macenko_domain_correction_all_findings/default/domain_shift_macenko.npy"
+
+alphas: [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5]
+
+# --- 最良alphaの目視ギャラリー診断(experiments/0039・0040と揃える) ---
+raw_slide_dir: "data/moo_collected_tggate_wsi/raw_wsi"
+baseline_thumbnails_dir: "data/trident_processed/thumbnails"
+nprobe: 32
+rerank_pool: 200
+max_tiles_reranked: null
+k_candidates: 8000
+top_n_slides: 20
+top_n_slides_to_plot: 3

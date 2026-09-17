@@ -1,0 +1,48 @@
+# ============================================================
+# experiments/0052: macenko_patchfit(既存) vs macenko_slidefit(experiments/0050)
+# を、GT対応7所見全部について目視ギャラリーで比較する
+# ============================================================
+# experiments/0051のGT best_rank比較は所見によって結果がバラバラだった
+# (改善: Single cell necrosis / Hematopoiesis / Inclusion body、
+#  悪化: Hypertrophy / Deposit,glycogen、
+#  found減少: Increased mitosis(10→9)/ Proliferation,Kupffer cell(1→0、
+#  ただしbaseline自体が既に壊れている所見))。found/best_rankの数字だけでは
+# 「返ってきたパッチが本当にその所見らしく見えるか」が分からない
+# (README「experiments/0037」「0041」「0045」の教訓)ため、この実験は
+# 両索引のギャラリーを並べて目視診断する材料を作るところまでを行う——
+# 採否判断はこの出力を見てから別途行う。
+#
+# クエリ側embed関数は両アームで完全に同一(experiments/0051と同じ
+# _macenko_tile_embed、lib.finding_routing.MACENKO_STAIN_REFERENCEへの
+# torchstain正規化) — コーパス側の染色ベクトル推定方法(パッチ単位fit vs
+# スライド単位fit)だけが違うよう統制している。alphaスイープは無い
+# (経路の違いそのものを見るのが目的で、線形補正の重ね掛けは別問題)。
+# ============================================================
+
+seed: 42
+tile_size: 224
+
+target_findings:
+  - "Hypertrophy"
+  - "Single cell necrosis"
+  - "Increased mitosis"
+  - "Deposit, glycogen"
+  - "Hematopoiesis, extramedullary"
+  - "Proliferation, Kupffer cell"
+  - "Inclusion body, intracytoplasmic"
+
+atlas_root: "data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver"
+atlas_figures_csv: "data/query/nnl_liver_atlas_figures.csv"
+
+macenko_slidefit_index_dir: "outputs/0050_20260916_build_faiss_index_macenko_slidefit/default"
+macenko_slidefit_features_dir: "data/trident_processed_uni_v1_macenko_slidefit/20x_224px_0px_overlap/features_uni_v1_macenko_slidefit"
+
+# --- 目視ギャラリー診断パラメータ(experiments/0045・0046と同一) ---
+raw_slide_dir: "data/moo_collected_tggate_wsi/raw_wsi"
+baseline_thumbnails_dir: "data/trident_processed/thumbnails"
+nprobe: 32
+rerank_pool: 200
+max_tiles_reranked: null
+k_candidates: 8000
+top_n_slides: 20
+top_n_slides_to_plot: 3
