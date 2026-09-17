@@ -1,0 +1,51 @@
+# ============================================================
+# experiments/0053: atlas vs corpus ドメインギャップ(experiments/0038)のうち、
+# 「拡張子(JPEG圧縮経路)の違い」に起因する分を切り分ける
+# ============================================================
+# 背景: experiments/0038でatlas図版とcorpusパッチはほぼ完全に分離可能な
+# ドメイン差(所見によらずスコア差10〜12)を持つと分かった。これまでの説明は
+# 「スキャナ・染色・解像度・図版特有のノイズ」だったが、atlas図版は全て.jpg
+# (`embed_atlas_images_as_positives`がPIL.Image.openでロード)である一方、
+# corpusパッチは.svsから直接切り出した生ピクセルをwsi_preprocessでUNI埋め込み
+# したh5を読むだけで、JPEG圧縮を一度も経由しない。この「拡張子(画像パイプ
+# ライン)の違い」自体がドメインギャップの一因になっていないかは、これまで
+# 一度も切り分けられていなかった(experiments/0044の設計メモで同種の懸念
+# 「JPEG経由 vs .svs直接」が別の比較軸で指摘されていたのと同じ論点)。
+#
+# 方法: experiments/0038と同じ手順でatlas vs corpusのドメイン分類器を学習し
+# (ただし本実験でプローブに使うスライドは負例プールから除外し、
+# train/test相当の漏洩を避ける)、コーパスから新たに生パッチを
+# lib.raw_patch.crop_patchで切り出す。各パッチについて
+#   (a) 生ピクセルのままUNI埋め込み(現行corpusパイプラインと同じ経路)
+#   (b) 同じピクセルを一度JPEGにエンコード→デコードしてからUNI埋め込み
+#       (品質を複数段階でスイープ)
+# を作り、分類器のdecision_functionでスコアする。(b)-(a)のスコア差が、
+# atlas-corpus間の本物のギャップ(10〜12)に対してどれくらいの割合を
+# 占めるかを見る。無視できる大きさなら「拡張子は主犯ではない」、無視できない
+# 大きさなら「線形補正やslidefitのような染色ベクトル側の対策では原理的に
+# 解消できない部分がドメインギャップに混ざっている」ことになる。
+#
+# (a)がh5の既存corpus埋め込み(同一座標)とcos_sim ~1.0で一致することも
+# 検証する(README「Tier 1 roundtrip」と同じ発想の再埋め込み一貫性チェック
+# ——これが崩れていると本実験自体の前提が壊れるため必須)。
+# ============================================================
+
+seed: 42
+
+index_dir: "outputs/0018_20260909_build_faiss_index_deblank/default"
+features_dir: "data/trident_processed/20x_224px_0px_overlap/features_uni_v1"
+raw_slide_dir: "data/moo_collected_tggate_wsi/raw_wsi"
+
+atlas_root: "data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver"
+atlas_figures_csv: "data/query/nnl_liver_atlas_figures.csv"
+
+tile_size: 224
+
+# --- 分類器の学習データ(experiments/0038と揃える) ---
+n_negative_patches: 8000
+classifier_C: 1.0
+
+# --- JPEG往復プローブ用の生パッチサンプリング ---
+n_slides: 20
+n_patches_per_slide: 10
+jpeg_qualities: [95, 85, 70, 50]
