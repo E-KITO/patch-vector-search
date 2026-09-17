@@ -1,0 +1,46 @@
+# ============================================================
+# experiments/0055: グローバルなdomain_shift(atlas平均-corpus平均、1本の
+# 方向)ではなく、クエリごとの局所k近傍平均差による補正(local domain shift)
+# をGT対応7所見でalphaスイープ検証する
+# ============================================================
+# 背景(ユーザー提案): experiments/0038の分類器はatlas/corpusをほぼ完璧に線形
+# 分離できるのに、experiments/0045・0054のグローバルな線形補正(domain_shift・
+# jpeg_shift・その残差)は所見ごとに効果がバラバラ(Kupffer cellには効くが
+# Hypertrophyには逆効果、等)だった。これは「1本のグローバルな方向」が所見に
+# よって欲しい補正の向きが異なることを示唆する。この実験は、補正方向を
+# クエリの埋め込み位置ごとに局所的に決める(k近傍のatlas平均 - k近傍の
+# corpus平均)ことで、この所見依存のばらつきを吸収できるかを検証する。
+#
+# 手順:
+#   1. atlas図版91枚全体(25所見)のタイルを埋め込み、タイルごとに由来画像を
+#      記録した「atlasプール」を作る(plain空間・macenko空間の両方)。
+#   2. コーパスから大きめのランダムサンプル(n_corpus_pool)を「corpusプール」
+#      として用意する(同じくplain/macenko両空間、コーパス側precomputed
+#      features)。
+#   3. 評価対象の所見の各atlas図版タイルについて、そのタイル自身の埋め込みを
+#      クエリとして、atlasプール(自分自身の由来画像のタイルは除外)から
+#      コサイン類似度top-k、corpusプールからtop-kを取り、それぞれの平均の差
+#      (= local_shift、そのタイル固有の補正方向)を計算する。
+#   4. corrected = L2_normalize(tile_vec - alpha * local_shift) として、
+#      finding_routingの実ルーティング空間(plain/whiten/macenko)でGT対応
+#      7所見のalphaスイープ(experiments/0045・0054と同じ枠組み、found優先→
+#      best_rank改善で選定)を行い、experiments/0045のグローバルdomain_shift
+#      と比較する。
+#
+# 出力(outputs/0055_.../default/):
+#   gt_comparison_{family}_local.csv
+#   best_alpha_by_finding_local.json
+#   summary.json    所見ごとにbase_best・local補正best_alpha/rank_deltaをまとめ、
+#                    experiments/0045のdomain_shift単独の結果と並べて比較
+# ============================================================
+
+seed: 42
+
+atlas_root: "data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver"
+atlas_figures_csv: "data/query/nnl_liver_atlas_figures.csv"
+
+tile_size: 224
+k_neighbors: 50
+n_corpus_pool: 30000
+
+alphas: [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.75, 1.0]
