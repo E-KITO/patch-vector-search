@@ -2593,7 +2593,7 @@ finding_routing表)ほど下流の実験全体の前提になっているため�
 | 7 | 0027 | atlas GT悪化の図版単位診断 | GT直接 | **完了(2026-09-18、experiments/0060)**: 0024〜0026の結論と整合。下記参照 |
 | 8 | 0028 | finding_routing.py本体の実装+検証(既存CSVの再集計) | GT直接(決定的) | **完了(2026-09-18、experiments/0061)**: Kupffer cell修正を反映して再集計。Inclusion bodyのwhiten vs macenko 3択比較が新たな残課題として判明 |
 | 9 | 0029・0030 | ルーティング適用のデモ・目視診断 | GT参照 | **完了(2026-09-18)**: 既存データの3択比較で対象所見の妥当性を再確認。下記参照 |
-| 10 | 0031 | Fatty Changeのmacenko vs plain目視診断 | GT言及(旧GT0枚で定量評価不可だった) | **一部完了**: GT3枚が判明したが`CATEGORIES`未登録のため定量評価は次の一手として残存 |
+| 10 | 0031 | Fatty Changeのmacenko vs plain目視診断 | GT言及(旧GT0枚で定量評価不可だった) | **完了(2026-09-18)**: CATEGORIES追加により初の定量評価。macenkoルーティングが誤りと判明・修正。下記参照 |
 | 11 | 0034 | macenkoルーティング先4所見の目視診断 | GT参照 | **完了(2026-09-18)**: Inclusion bodyのmacenkoルーティングが誤りと判明・修正。下記参照 |
 | 12 | 0035・0036・0037 | OvR分類器によるタイル事前重み付け | self_retrieval+single_finding+GT | 中〜高: OvR学習データがGT由来。「全所見一律1.0」という null 結果がGT不足の産物でないか要確認 |
 | 13 | 0038 | atlas vs corpusドメインギャップの定量化 | single_finding+GT | 中 |
@@ -2733,14 +2733,30 @@ baseline(50)よりさらに悪い。`lib/finding_routing.py`の`MACENKO_FINDINGS
 上記「experiments/0059」の留保参照)で、かつこの所見自体がランダム対照で
 不成立(README「所見の3クラス分け」)と確定済みのため実害が無い。
 
-**未解決のまま残る**: Fatty Change(`Degeneration, fatty`)は完全版GTでコーパスに
-3枚のGTスライドが見つかった(README「GTソースの根本的な過小カウントが判明」)が、
-`CATEGORIES`(`scripts/validate_against_ground_truth.py`)に未登録のため、
-これまで一度も定量評価(baseline/macenko/whitenの3択)ができていない
-(experiments/0031/0034はいずれも目視のみ)。次の一手として`CATEGORIES`への
-追加を検討する必要がある——ただし`CATEGORIES`は0038〜0057等の多くの過去実験で
-「7カテゴリちょうど」を前提にした`assert`が書かれているため、追加は将来の
-再現実行に影響することに留意。
+### Fatty Change(Degeneration, fatty)の初めての定量評価(2026-09-18)
+
+Fatty Changeは完全版GTでコーパスに3枚のGTスライドが見つかった(上記「GTソースの
+根本的な過小カウントが判明」)ため、`CATEGORIES`(`scripts/validate_against_ground_truth.py`)
+に追加し(ユーザー確認済み、8カテゴリ化。0038〜0057等の過去実験が前提にしていた
+「7カテゴリちょうど」への影響は将来の再現実行時に個別対応)、初めて定量的な
+3択比較を実行した。experiments/0031/0034ではmacenko側が目視で視覚的に妥当な
+一致を示していたが、定量結果は逆だった:
+
+| 所見 | baseline | macenko | whiten | 最良 |
+|---|---|---|---|---|
+| Degeneration, fatty | 17 | 28 | **3** | **whiten** |
+
+**whitenが3択中最良、現行のmacenkoルーティング(28)はbaselineより悪い最下位。**
+目視診断(0031/0034)でmacenko側の脂肪空胞テクスチャが視覚的に妥当に見えたのは
+事実だが、実際にGTスライドをランキングで引き当てる精度では逆にwhitenが優れて
+いたことになる——「見た目のもっともらしさ」と「検索精度」が一致しない所見が
+ここでも見つかった(Kupffer cell・Inclusion bodyに続く3件目)。
+`WHITEN_FINDINGS`に移した。
+
+これで完全版GT再検証によるルーティング表の修正は4件(Kupffer cell:
+whiten→baseline、Inclusion body・Fatty Change: macenko→whiten、Hypertrophy:
+差僅少で維持)。`MACENKO_FINDINGS`に残るのはHypertrophy・Increased mitosisの
+2所見のみとなった。
 
 
 ## 次の一手(成果物トラック)

@@ -16,9 +16,15 @@ experiments/0025-0031 で、次の2種類の変換がそれぞれ所見によっ
 を出し分ける。GT実測の無い所見はすべて保守的に baseline(「悪化しないと確認
 できるまでは使わない」方針)。
 
-Hypertrophy と Inclusion body, intracytoplasmic は whiten・macenko の両方で
-GT改善が確認されたため、GT改善幅がより大きい macenko を採用した(ユーザー確認
-済み、README「experiments/0031」の三択問題)。
+【2026-09-18 修正】上記の判断は単一所見フィルタ済みGT(single_finding_liver.csv、
+併発所見を持つ個体を丸ごと除外)に基づいていたと判明(README「GTソースの根本的な
+過小カウントが判明」参照)。完全版GT(full_finding_liver.csv)でbaseline/whiten/
+macenkoの3択を直接比較し直した結果(README「experiments/0029〜0031・0034の
+再検証」)、Inclusion body, intracytoplasmicとDegeneration, fatty(Fatty Change)
+はmacenkoではなくwhitenが最良と判明、WHITEN_FINDINGSに移した。Proliferation,
+Kupffer cellも同様の理由でwhitenからbaselineに戻した(README「experiments/
+0024〜0026」)。Hypertrophyのみ、僅差でbaselineが優れるが実害が無いため
+macenkoのまま維持している。
 """
 from __future__ import annotations
 
@@ -87,6 +93,7 @@ MACENKO_STAIN_REFERENCE = Path("data/baseline/63958_x38976_y7616.png")
 WHITEN_FINDINGS = frozenset({
     "Necrosis",
     "Inclusion body, intracytoplasmic",
+    "Degeneration, fatty",
 })
 
 # experiments/0031 で Macenko が有利と確認された所見。Hypertrophy / Inclusion
@@ -103,13 +110,18 @@ WHITEN_FINDINGS = frozenset({
 # baseline=1・macenko=2と僅差でbaselineがわずかに優位だが、差が小さく
 # (GT数増加による基準率上昇の影響が大きいと見られる)、かつこの所見自体が
 # ランダム対照で不成立(README「所見の3クラス分け」)と確定済みで実害が
-# 無いため、ルーティングは変更せず macenko のまま維持する。Fatty Change は
-# 完全版GTでコーパスに3枚のGTスライドが見つかった(README「GTソースの根本的な
-# 過小カウントが判明」参照)が、CATEGORIES への追加・定量的な3択比較はまだ未実施。
+# 無いため、ルーティングは変更せず macenko のまま維持する。
+#
+# 【2026-09-18 修正2】Fatty Change(コーパス側ラベル "Degeneration, fatty")も
+# 完全版GTでコーパスに3枚のGTスライドが見つかり、CATEGORIES へ追加して初めて
+# 定量的な3択比較ができた(experiments/0029〜0031・0034 再検証)。結果は
+# best_rank: baseline=17, macenko=28, whiten=3 と**whitenが圧倒的に最良で、
+# 現行のmacenkoルーティングは3択中最悪**だった。experiments/0031/0034の目視で
+# macenko側が視覚的に妥当に見えたのは事実だが、定量的にはwhitenの方が優れる。
+# WHITEN_FINDINGSへ移した。
 MACENKO_FINDINGS = frozenset({
     "Hypertrophy",
     "Increased mitosis",
-    "Degeneration, fatty",
 })
 
 
