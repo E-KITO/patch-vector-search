@@ -2588,7 +2588,7 @@ finding_routing表)ほど下流の実験全体の前提になっているため�
 | 2 | 0015 | コーパスseed版deliver(glycogen成立) | single_finding直接 | 同上(0058で既に部分再検証済み) |
 | 3 | 0016 | クエリ埋め込み経路の交絡切り分け | self_retrieval+single_finding | 低(結論は経路自体の話でGT量に非依存の可能性) |
 | 4 | 0019 | 背景除去後のdeliver再実行 | single_finding直接 | glycogen/ground glassは0058で確認済み。granular eosinophilicは未確認 |
-| 5 | **0022・0023** | 倍率補正の検証・決着 | self_retrieval / single_finding+GT | **高**: 「倍率補正は棚上げ」という早期の核となる決定。自己検索の天井を参照基準にしている |
+| 5 | ~~0022~~・**0023** | 倍率補正の検証・決着 | ~~0022は誤検出(所見ラベル不使用の合成自己参照テスト)~~ / 0023はsingle_finding+GT直接 | **完了(2026-09-18、experiments/0059)**: 結論は変化なし、むしろ補強された。下記参照 |
 | 6 | **0024・0025・0026** | 異方性除去(whiten)の構築・alphaスイープ | self_retrieval+GT両方 | **高**: whiten採用の可否判断の根拠。finding_routingの前提 |
 | 7 | 0027 | atlas GT悪化の図版単位診断 | GT直接 | 中: 0028の直接の根拠 |
 | 8 | **0028** | **finding_routing.py本体の実装+検証** | GT直接(決定的) | **最高**: 今回Hypertrophy/Inclusion bodyの逆転が実証済み。全ルーティング表の再導出が必要 |
@@ -2608,9 +2608,36 @@ finding_routing表)ほど下流の実験全体の前提になっているため�
 | 22 | 0058 | 3所見の追加deliver + ランダム対照 | 直接(本項の起点) | 完了。Swellingのみ9枚seedでの再deliverが残タスク |
 
 **未着手**: 上表のうち実際に完全版GTで再実行したのは自己検索診断・
-アトラスGT検証の「素の再計測」(今回のjobs 10995/10996)のみ。表中の各実験
-固有のスクリプト(alphaスイープ、ルーティング表の再導出等)はまだ何も
-再実行していない。
+アトラスGT検証の「素の再計測」(今回のjobs 10995/10996)と、下記0059のみ。
+表中の残りの実験固有のスクリプト(alphaスイープ、ルーティング表の再導出等)は
+まだ再実行していない。
+
+### experiments/0059: 0023(倍率補正の決着)を完全版GTで再実行(2026-09-18、job 11001)
+
+チェックリストの最初の項目。`experiments/0023`から`gt_csv`のみ
+`full_finding_liver.csv`に差し替えたA/B(他パラメータは完全に同一)。
+
+| カテゴリ | baseline best(旧→新) | 最良autoscaleアーム best(旧→新) | 旧の勝者 | 新の勝者 |
+|---|---|---|---|---|
+| Hypertrophy | 30→1 | 23→7 | autoscale | **baseline(逆転)** |
+| Single cell necrosis | 14→1 | 13→4 | autoscale(僅差) | **baseline(逆転)** |
+| Increased mitosis | 10→10(不変) | 9→3 | autoscale | autoscale(維持・差が拡大) |
+| Deposit, glycogen | 7→7(不変) | 101→101(不変) | baseline | baseline(不変、correction適用で破綻したまま) |
+| Hematopoiesis, extramedullary | 28→1 | 25→1 | autoscale(僅差) | 引き分け |
+| Proliferation, Kupffer cell | 78→13 | 33→33(不変) | autoscale | **baseline(逆転)** |
+| Inclusion body, intracytoplasmic | 475→50(旧GTはわずか1枚) | 測定不能→35 | (測定不能) | autoscale(僅差) |
+
+**結論: 「倍率補正はコアパイプラインに入れない」という実務上の決定は変化なし、
+むしろ補強された。** 7カテゴリ中5カテゴリでbaselineが逆転または同点になり、
+autoscaleが依然勝っているのはIncreased mitosis(差はむしろ拡大)とInclusion
+body(僅差、旧GTはわずか1枚での測定だった)のみ。glycogenは相変わらず
+correction適用で完全に破綻(best 7→101)。
+
+留保: 各カテゴリのbest_rankが軒並み1に近づいているのは、GT数が増えたことで
+「上位候補がたまたまGTに当たる」基準率が上がった効果を含む可能性がある
+(experiments/0058のfinding_routing比較で見たのと同じ注意点)。baseline同士・
+autoscale同士の相対比較としては有効だが、絶対値の改善を額面通りに
+「検索精度が上がった」と読むのは避けること。
 
 ## 次の一手(成果物トラック)
 
