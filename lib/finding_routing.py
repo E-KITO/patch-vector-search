@@ -76,8 +76,17 @@ MACENKO_STAIN_REFERENCE = Path("data/baseline/63958_x38976_y7616.png")
 # 予約——安易に "Single cell necrosis" へキー名を変更しないこと(それは逆に
 # 悪化が確認されている経路を有効化してしまう)。この n=13 の evidence も
 # 単一所見フィルタ済みGTに基づくもので、完全版GTでは未検証。
+#
+# 【2026-09-18 修正】完全版GT(full_finding_liver.csv)で baseline/whiten/macenko
+# の3択を初めて同一条件(validate_against_ground_truth.py、同一CATEGORIES)で
+# 直接比較したところ、"Inclusion body, intracytoplasmic" は旧GT(1枚)による
+# 「macenko改善幅がwhitenより大きい」という判断(下記 MACENKO_FINDINGS の説明
+# 参照)が誤りで、**完全版GT(6枚)ではwhitenが3択中最良**(best_rank:
+# baseline=50, macenko=80, whiten=10)と判明した。MACENKO_FINDINGSから
+# WHITEN_FINDINGSへ移した(experiments/0059〜0061 再検証、jobs 10996/11005)。
 WHITEN_FINDINGS = frozenset({
     "Necrosis",
+    "Inclusion body, intracytoplasmic",
 })
 
 # experiments/0031 で Macenko が有利と確認された所見。Hypertrophy / Inclusion
@@ -88,10 +97,18 @@ WHITEN_FINDINGS = frozenset({
 # ので競合なし。Fatty Change(コーパス側ラベル "Degeneration, fatty")はGT
 # スライドが0枚のため定量評価はできないが、experiments/0031 の目視診断で
 # macenko側が視覚的に妥当な一致を示した。
+#
+# 【2026-09-18 修正】完全版GTでの3択直接比較(上記 WHITEN_FINDINGS 参照)で
+# Inclusion body はwhitenへ移動。Hypertrophyは完全版GT(53枚)でも
+# baseline=1・macenko=2と僅差でbaselineがわずかに優位だが、差が小さく
+# (GT数増加による基準率上昇の影響が大きいと見られる)、かつこの所見自体が
+# ランダム対照で不成立(README「所見の3クラス分け」)と確定済みで実害が
+# 無いため、ルーティングは変更せず macenko のまま維持する。Fatty Change は
+# 完全版GTでコーパスに3枚のGTスライドが見つかった(README「GTソースの根本的な
+# 過小カウントが判明」参照)が、CATEGORIES への追加・定量的な3択比較はまだ未実施。
 MACENKO_FINDINGS = frozenset({
     "Hypertrophy",
     "Increased mitosis",
-    "Inclusion body, intracytoplasmic",
     "Degeneration, fatty",
 })
 
