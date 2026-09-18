@@ -2601,9 +2601,9 @@ finding_routing表)ほど下流の実験全体の前提になっているため�
 | 15 | 0041・0042 | macenko+線形補正の全所見目視検証 | single_finding+GT | 中 |
 | 16 | 0045 | finding routed domain correction GTスイープ | GT直接 | 高: 0054・0055の前身データ |
 | 17 | 0046・0047・0048 | 同上の目視スイープ・文脈対照・候補プール分析 | single_finding | 中: 0048は「候補が枯れやすい」の原因分析、GT過小カウントと直接関係しうる |
-| 18 | **0051** | **macenkoスライド単位fit vs パッチ単位fitのGT評価(現行corpus選定の決め手)** | GT直接(決定的) | **最高**: 現行macenkoコーパスそのものの採否判断。**着手(2026-09-18、experiments/0063)**: 下記参照、結果待ち |
-| 19 | 0054 | JPEG-shift補正のGT対応7所見alphaスイープ | GT直接 | 高: 直近の補正方針の根拠 |
-| 20 | **0055** | 局所k近傍補正のGT対応7所見alphaスイープ(2件の空間逆転を発見) | GT直接 | **高**: 現在採用中の空間選択の最新根拠 |
+| 18 | **0051** | **macenkoスライド単位fit vs パッチ単位fitのGT評価(現行corpus選定の決め手)** | GT直接(決定的) | **最高**: 現行macenkoコーパスそのものの採否判断。**完了(2026-09-18、experiments/0063、job 11039)**: 結論不変(REGRESSED、slidefit不採用)。下記参照 |
+| 19 | 0054 | JPEG-shift補正のGT対応7所見alphaスイープ | GT直接 | 高: 直近の補正方針の根拠。**着手(2026-09-18、experiments/0064)**: 作成済み、投入待ち |
+| 20 | **0055** | 局所k近傍補正のGT対応7所見alphaスイープ(2件の空間逆転を発見) | GT直接 | **高**: 現在採用中の空間選択の最新根拠。**着手(2026-09-18、experiments/0065)**: 作成済み、投入待ち |
 | 21 | 0057 | GTの無い18所見の目視スイープ | GT参照(baseline文脈のみ) | 低: 結論(13/18が原理的に不可)はGT量に非依存とみられる |
 | 22 | 0058 | 3所見の追加deliver + ランダム対照 | 直接(本項の起点) | 完了。Swellingのみ9枚seedでの再deliverが残タスク |
 
@@ -2815,7 +2815,39 @@ Fatty Change追加で7→8所見になっているため、`gt_comparison.csv`�
 確認が必要)。
 
 実行: `runx 63`(GPU 1、`small-creator-i`、既存索引を再利用するため軽量・
-1h想定)。結果待ち。
+1h想定)。
+
+**結果(2026-09-18、job 11039)**: **総合判定は旧GTと同じ`REGRESSED`
+(slidefitへの切替は非推奨)——完全版GTでも結論は変わらず、むしろ結論の
+頑健性が補強された**。
+
+| 所見 | 旧GT(n_gt) | 旧: patchfit best→slidefit best | 完全GT(n_gt) | 完全GT: patchfit best→slidefit best | 判定(両GT共通) |
+|---|---|---|---|---|---|
+| Hypertrophy | 25 | 18→35(悪化) | 53 | 2→2(**同点、旧の「悪化」から不変に変化**) | worsened→unchanged |
+| Single cell necrosis | 4 | 85→69(改善) | 23 | 2→1(改善) | improved |
+| Increased mitosis | 10 | found 10→9(**regressed**) | 20 | found 19→17(**regressed**) | regressed |
+| Deposit, glycogen | 6 | 14→22(悪化) | 6(不変) | 14→22(悪化、同一値) | worsened |
+| Hematopoiesis, extramedullary | 3 | 83→51(改善) | 5 | 38→51(悪化に反転) | improved→worsened |
+| Proliferation, Kupffer cell | 2 | found 1→0(**regressed、slidefitで完全消失**) | 5 | found 4→3(**regressed、緩和はしたが依然消失あり**) | regressed |
+| Inclusion body, intracytoplasmic | 1 | 52→15(改善) | 6 | 52→15(改善、同一値) | improved |
+| Degeneration, fatty | (CATEGORIES未追加のため旧実験では未評価) | — | 3 | 26→20(改善) | improved(新規) |
+
+- **regressed(found減少)の所見はIncreased mitosisとKupffer cellで旧GT・完全GT
+  共に一致**——これが最終判定を`REGRESSED`に固定する決め手であり、GT量の
+  増加に左右されない頑健な結論。Kupffer cellはfound減少の程度が1/2→0から
+  4/5→3に緩和されたが、依然としてslidefitでGTスライドが1枚候補プールから
+  消えており、regressed判定自体は変わらない。
+- Hypertrophyは旧GT(25枚)では「best_rank 18→35で明確に悪化」だったが、
+  完全GT(53枚)では「2→2で完全に同点」に変化した——**サンプル数が少ない
+  旧GTでは偶然の順位変動を「悪化」と誤認していた可能性を示す一例**。ただし
+  最終判定には影響しない(regressed所見が別に2つあるため)。
+- Hematopoiesisはimproved→worsenedに反転したが、best_rank自体は38→51と
+  38→51(改善)/83→51(改善)のいずれでも大差ない範囲であり、GT枚数3→5の
+  変化に伴う軽微な順位変動とみられる。
+- **結論**: 現行本番のMacenko索引(experiments/0033、パッチ単位fit、
+  `lib.finding_routing.MACENKO_INDEX_DIR`)を変更する必要はない。slidefit
+  (experiments/0050)への切替は完全版GTでも不採用が正しい判断と確認できた。
+  `lib/finding_routing.py`の変更は不要。
 
 ## 次の一手(成果物トラック)
 

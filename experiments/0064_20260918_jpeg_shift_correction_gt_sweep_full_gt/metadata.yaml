@@ -1,0 +1,7 @@
+exp_id: 0064
+exp_name: 0064_20260918_jpeg_shift_correction_gt_sweep_full_gt
+created_date: 20260918
+git_commit: ff6523b331b11d1c4e54a16872ca668307c3a034
+resumed_from_exp: 0054_20260917_jpeg_shift_correction_gt_sweep
+resume_checkpoint_dir: outputs/0054_20260917_jpeg_shift_correction_gt_sweep
+resume_checkpoint_file: null
