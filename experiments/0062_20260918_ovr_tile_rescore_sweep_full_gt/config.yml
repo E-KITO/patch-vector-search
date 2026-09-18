@@ -1,0 +1,73 @@
+# ============================================================
+# experiments/0062: 0036 を完全版GT(full_finding_liver.csv)で再実行するA/B
+# ============================================================
+# 2026-09-18: single_finding_liver.csv がプロジェクト全体の唯一のGTソース
+# だったと判明。0036は特に、Proliferation, Kupffer cell / Inclusion body,
+# intracytoplasmicが「study数1のためLOSO不可」という制約付きだったが、完全版
+# GTではKupffer cell が2study→5枚(自己検索診断の完全GT再計測 nE=5)、
+# Inclusion bodyも同様に増えており、LOSOが初めて可能になる可能性がある。
+# Hypertrophyの「LOSO AUROCがfold間で激しくブレる(0.10〜0.92)」という
+# 不安定性も、GT25→53枚・study14→31に増えたことで結論が変わるか要確認。
+# gt_csv だけを full_finding_liver.csv に差し替え、他は0036と完全に同一。
+# ============================================================
+# 以下は0036オリジナルのコメント(狙い、変更なし):
+# ============================================================
+# experiments/0036: OvR(One-vs-Rest)タイル事前重み付けを複数所見で再試行
+# ============================================================
+# experiments/0035(Hypertrophy単体)で、①LOSO AUROCの分散が異常に大きく
+# (0.10〜0.92)分類器がstudy/化合物というバッチを学習している疑いが強い、
+# ②タイル事前フィルタを掛けてもパッチギャラリーは0枚のままだった、という
+# 否定的な結果が出た。これがHypertrophyという所見固有の限界(相対的・びまん性で
+# パッチ単位の識別特徴を持たない)なのか、OvR手法そのものの限界なのかを、
+# atlas図版が存在する(scripts.validate_against_ground_truth.CATEGORIES)全所見に
+# 展開して切り分ける。
+#
+# 対象所見は CATEGORIES の7所見全部(target_findingsに列挙)。所見によって
+# コーパス内GT枚数・study数が大きく異なる(README「自己検索診断」参照、
+# outputs/gt_validations/self_retrieval_diagnostic.csv):
+#   Hypertrophy(25枚・14study)、Single cell necrosis(4・3)、Increased mitosis(10・7)、
+#   Deposit, glycogen(6・4)、Hematopoiesis, extramedullary(3・3)、
+#   Proliferation, Kupffer cell(2・1、LOSO不可)、Inclusion body, intracytoplasmic
+#   (コーパス内GTがそもそも自己検索診断の対象外=2枚未満の可能性が高い、失敗しうる)。
+# 1所見あたり失敗しても他所見の実行を止めないよう、experiment.py側で所見ごとに
+# try/exceptしてある。
+# ============================================================
+
+seed: 42
+
+target_findings:
+  - "Hypertrophy"
+  - "Single cell necrosis"
+  - "Increased mitosis"
+  - "Deposit, glycogen"
+  - "Hematopoiesis, extramedullary"
+  - "Proliferation, Kupffer cell"
+  - "Inclusion body, intracytoplasmic"
+
+gt_csv: "data/processed_csv/full_finding_liver.csv"
+
+index_dir: "outputs/0018_20260909_build_faiss_index_deblank/default"
+features_dir: "data/trident_processed/20x_224px_0px_overlap/features_uni_v1"
+
+# --- 分類器の学習データ(experiments/0035と同一) ---
+max_positive_patches_per_slide: 300
+n_negative_patches: 6000
+neg_test_fraction: 0.2
+classifier_C: 1.0
+
+# --- タイル事前重み付け(experiments/0035と同一) ---
+keep_frac: 0.3
+
+# --- atlas クエリ・検索パラメータ(experiments/0034/0035と揃える) ---
+atlas_root: "data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver"
+atlas_figures_csv: "data/query/nnl_liver_atlas_figures.csv"
+raw_slide_dir: "data/moo_collected_tggate_wsi/raw_wsi"
+baseline_thumbnails_dir: "data/trident_processed/thumbnails"
+
+tile_size: 224
+nprobe: 32
+rerank_pool: 200
+max_tiles_reranked: null
+k_candidates: 8000
+top_n_slides: 20
+top_n_slides_to_plot: 3
