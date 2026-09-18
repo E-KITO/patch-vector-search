@@ -69,6 +69,15 @@ GT_CSV = Path("data/processed_csv/single_finding_liver.csv")
 # useful here — most atlas categories have zero (a known corpus limitation,
 # see patch-vector-search-project memory), so this list is intentionally
 # short rather than all 25 atlas categories.
+# 【2026-09-18 追加】"Liver - Fatty Change" (-> "Degeneration, fatty") は
+# single_finding_liver.csv ではコーパスGT0枚だったため長らく未登録だったが、
+# 完全版GT(data/processed_csv/full_finding_liver.csv、README「GTソースの
+# 根本的な過小カウントが判明」参照)でコーパスに3枚のGTスライドが見つかった。
+# ⚠️ CATEGORIES は多くの過去実験(experiments/0038〜0057等)で
+# `assert len(gt_df) == len(CATEGORIES)` のように「7カテゴリちょうど」を
+# 前提にしたコードが書かれている。8カテゴリになったことで、それらを
+# 将来もう一度動かす場合は個別に確認・修正が必要(過去の実行結果自体は
+# 影響を受けない)。
 CATEGORIES = {
     "Liver, Hepatocyte - Hypertrophy - Nonneoplastic Lesion Atlas": "Hypertrophy",
     "Liver - Necrosis - Nonneoplastic Lesion Atlas": "Single cell necrosis",
@@ -77,6 +86,7 @@ CATEGORIES = {
     "Liver - Extramedullary Hematopoiesis - Nonneoplastic Lesion Atlas": "Hematopoiesis, extramedullary",
     "Liver, Kupffer Cell - Hyperplasia - Nonneoplastic Lesion Atlas": "Proliferation, Kupffer cell",
     "Liver, Hepatocyte - Cytoplasmic Inclusions - Nonneoplastic Lesion Atlas": "Inclusion body, intracytoplasmic",
+    "Liver - Fatty Change - Nonneoplastic Lesion Atlas": "Degeneration, fatty",
 }
 
 
