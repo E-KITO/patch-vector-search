@@ -47,6 +47,20 @@ MACENKO_STAIN_REFERENCE = Path("data/baseline/63958_x38976_y7616.png")
 # 確認された所見。Hypertrophy と Inclusion body はここには含めない(macenko の
 # 方がGT改善幅が大きく、そちらを採用したため — 下記 MACENKO_FINDINGS 参照)。
 #
+# 【2026-09-18 修正】single_finding_liver.csv(併発所見を持つ個体を丸ごと
+# 除外するフィルタ済みGT)がプロジェクト全体の唯一のGTソースだったと判明
+# (README「GTソースの根本的な過小カウントが判明」参照)。"Proliferation,
+# Kupffer cell" は旧GT(コーパスにわずか2枚)でwhitenがbaselineに僅差で
+# 勝っていた(best_rank 72 vs 78)ためWHITEN_FINDINGSに入れていたが、
+# 完全版GT(data/processed_csv/full_finding_liver.csv、コーパス5枚)で
+# 再評価すると baseline=13 対 whiten=72 のまま、と**baselineが圧倒的に
+# 優位**と判明した(experiments/0024〜0026 再検証、jobs 11004/11005)。
+# whitenはコーパス内自己検索(self_retrieval_diagnostic)では改善するが、
+# 実運用に近いアトラスクエリ(validate_against_ground_truth)では悪化する
+# ——0025/0027で確立済みのパターンがここでも再現された。ルーティングは
+# アトラスクエリを想定した判断なので "Proliferation, Kupffer cell" を
+# WHITEN_FINDINGSから外しbaselineに戻した。
+#
 # ⚠️ "Necrosis"(コーパスGT n=13の広いラベル)と "Single cell necrosis"
 # (atlas フォルダ "Liver - Necrosis" が scripts.validate_against_ground_truth.
 # CATEGORIES を通じて実際に解決される先、コーパスGT n=4)は、single_finding_liver.csv
@@ -60,10 +74,10 @@ MACENKO_STAIN_REFERENCE = Path("data/baseline/63958_x38976_y7616.png")
 # SUPPORTED_FINDINGS にも無い)からも到達しない。将来 bare "Necrosis" ラベルを
 # 直接クエリする経路(例: 0019 の SUPPORTED_FINDINGS 拡張)を追加する場合のための
 # 予約——安易に "Single cell necrosis" へキー名を変更しないこと(それは逆に
-# 悪化が確認されている経路を有効化してしまう)。
+# 悪化が確認されている経路を有効化してしまう)。この n=13 の evidence も
+# 単一所見フィルタ済みGTに基づくもので、完全版GTでは未検証。
 WHITEN_FINDINGS = frozenset({
     "Necrosis",
-    "Proliferation, Kupffer cell",
 })
 
 # experiments/0031 で Macenko が有利と確認された所見。Hypertrophy / Inclusion

@@ -2589,7 +2589,7 @@ finding_routing表)ほど下流の実験全体の前提になっているため�
 | 3 | 0016 | クエリ埋め込み経路の交絡切り分け | self_retrieval+single_finding | 低(結論は経路自体の話でGT量に非依存の可能性) |
 | 4 | 0019 | 背景除去後のdeliver再実行 | single_finding直接 | glycogen/ground glassは0058で確認済み。granular eosinophilicは未確認 |
 | 5 | ~~0022~~・**0023** | 倍率補正の検証・決着 | ~~0022は誤検出(所見ラベル不使用の合成自己参照テスト)~~ / 0023はsingle_finding+GT直接 | **完了(2026-09-18、experiments/0059)**: 結論は変化なし、むしろ補強された。下記参照 |
-| 6 | **0024・0025・0026** | 異方性除去(whiten)の構築・alphaスイープ | self_retrieval+GT両方 | **高**: whiten採用の可否判断の根拠。finding_routingの前提 |
+| 6 | 0024・0025・0026 | 異方性除去(whiten)の構築・alphaスイープ | self_retrieval+GT両方 | **完了(2026-09-18、jobs 11004/11005)**: Kupffer cellのwhitenルーティングが薄いGTによる誤りと判明。下記参照 |
 | 7 | 0027 | atlas GT悪化の図版単位診断 | GT直接 | 中: 0028の直接の根拠 |
 | 8 | **0028** | **finding_routing.py本体の実装+検証** | GT直接(決定的) | **最高**: 今回Hypertrophy/Inclusion bodyの逆転が実証済み。全ルーティング表の再導出が必要 |
 | 9 | 0029・0030 | ルーティング適用のデモ・目視診断 | GT参照 | 0028が変われば自動的に対象所見が変わる |
@@ -2638,6 +2638,44 @@ correction適用で完全に破綻(best 7→101)。
 (experiments/0058のfinding_routing比較で見たのと同じ注意点)。baseline同士・
 autoscale同士の相対比較としては有効だが、絶対値の改善を額面通りに
 「検索精度が上がった」と読むのは避けること。
+
+### experiments/0024〜0026: whiten採用判断を完全版GTで再検証(2026-09-18、jobs 11004/11005)
+
+チェックリストの2件目。0025(full ZCA whiten・abtt4)と0026(shrinkage whiten
+α=0.25/0.5/0.75)は既に18Mパッチのフル索引を構築済みなので、**索引の
+再構築はせず**評価ステージ(self_retrieval_diagnostic.py /
+validate_against_ground_truth.py)だけを完全版GTで回した
+(`adhoc_*.sh`に複数variant直列ループ対応を追加、commit参照)。
+
+**アトラスGT側(job 11005、実運用のクエリ形式に近い軸)**:
+
+| 所見 | baseline best(旧→新) | whiten best(旧→新) | 旧の勝者 | 新の勝者 |
+|---|---|---|---|---|
+| Hypertrophy | 30→1 | 21→21(不変) | whiten | **baseline** |
+| Single cell necrosis | 14→1 | 45→3 | baseline(既定通り) | baseline(維持) |
+| Increased mitosis | 10→10(不変) | 16→16(不変) | (macenko採用、whiten対象外) | 不変 |
+| Deposit, glycogen | 7→7(不変) | 15→15(不変) | baseline(既定通り) | baseline(維持) |
+| Hematopoiesis, extramedullary | 28→1 | 109→4 | baseline(既定通り) | baseline(維持) |
+| **Proliferation, Kupffer cell** | 78→**13** | 72→**72(不変)** | **whiten(僅差72<78)** | **baseline(13<<72、大逆転)** |
+| Inclusion body, intracytoplasmic | 475→50(旧GT1枚) | 368→**10** | whiten | whiten(さらに明確化) |
+
+**自己検索診断側(job 11004、コーパス内クエリ)**: whitenは`nhr_best_rank_med_noexp`を
+多くの所見で改善した(Hypertrophy 16.5→7.5-9、Single cell necrosis 26→13-15.5、
+Increased mitosis 83→44.5-55、glycogen 21→11.5-12、Kupffer cell 514→413(whitenのみ改善、
+abtt4は534に悪化))。
+
+**この2つの軸の食い違いは想定内**: experiments/0025/0027で既に「whitenはコーパス内検索を
+改善するが、ドメインギャップを跨ぐアトラスクエリでは所見によって悪化する」と分かっており、
+今回の完全GTでの再測定はこのパターンを裏付けただけ。finding_routing.pyのルーティングは
+**実運用のアトラス的クエリを想定した判断**なので、自己検索ではなくアトラスGT側を優先すべき。
+
+**結論: `finding_routing.py`の`WHITEN_FINDINGS`にある唯一の現役エントリ
+`Proliferation, Kupffer cell`は、旧GT(わずか2枚)による僅差(72 vs 78)の判断
+だった。** 完全GT(5枚)ではbaselineが13、whitenは72のまま変わらず、baselineが
+圧倒的に優れる。Hypertrophy・Inclusion body(experiments/0059/job 10996)に続く
+3件目の「薄いGTサンプルに基づくルーティング誤り」。`WHITEN_FINDINGS`から
+`Proliferation, Kupffer cell`を外し baseline に戻すべきと判断する
+(`Necrosis`エントリは元々どの呼び出し元からも到達しない予約枠なので実害なし)。
 
 ## 次の一手(成果物トラック)
 
