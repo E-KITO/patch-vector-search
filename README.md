@@ -2486,15 +2486,72 @@ GTの無い18所見(25所見からCATEGORIES対応7所見を除いたもの)に�
 今後この種の検証をする際は必ず目視(または found/best_rank のような
 外部の正解基準)を経由する必要がある。
 
+## experiments/0058: glycogen/ground glassに続く3例目探索 — Microgranuloma・Cellular infiltration・Swellingはランダム対照で不成立(2026-09-18、jobs 10988/10991)
+
+track B(成果物所見の追加)として、`self_retrieval_diagnostic.csv` で
+「バッチ交絡なし(batch_dominates_finding_rate=0.0)・コーパス内GTスライドが
+少ない(16/7/7枚、glycogenの6枚と同水準にスパース)」という基準で選んだ
+Microgranuloma・Cellular infiltration・Swellingの3所見を、0019のdeliver
+パイプラインで初めて構築した(job 10988、`experiments/0058`)。
+
+当初 track B 候補に挙げた Tension Lipidosis・Cholangiofibrosis は
+コーパスGTスライドが0枚(Fatty Changeと同型)で検証不能と判明し、この
+3所見に差し替えた経緯がある。
+
+deliver結果:
+
+| 所見 | 最終枚数/スライド数 | 候補プール |
+|---|---|---|
+| Microgranuloma | 150枚/62スライド(target達成) | 5000→547候補 |
+| Cellular infiltration | 80枚/18スライド(候補枯れ) | 5000→237候補 |
+| Swelling | 24枚/7スライド(候補が大きく枯渇) | 5000→24候補 |
+
+`scripts/random_patch_baseline.py`(job 10991)でランダム対照を作り、
+glycogen/ground glassと同じ手順(Claude・非専門家によるブラインド判定→
+`blind_key.csv`で答え合わせ)で検証したところ、3所見とも不成立だった:
+
+| 所見 | 判定精度 | ベースライン(多数派選択) | 判定 |
+|---|---|---|---|
+| Microgranuloma | 49/100 = 49.0% | 61.0% | **不成立**(ベースライン以下) |
+| Cellular infiltration | 80/160 = 50.0% | 50.0% | **不成立**(完全に偶然) |
+| Swelling | 26/48 = 54.2% | 50.0% | **不成立**(誤差範囲) |
+
+参考: glycogen・ground glassは同一手法で91%(ベースライン50%)と明確に
+分離できていた。今回の3所見はいずれもその水準に遠く及ばず、hypertrophy
+(59%、ベースライン61%)と同型の不成立パターンだった。
+
+**教訓**: `self_retrieval_diagnostic`の「バッチ交絡なし・実信号あり」は、
+コーパス内でのslide-levelクラスタリングを測る指標であり、deliverモードが
+出す**patch-levelの集合が非専門家に視覚的に選別可能か**とは別の基準
+である。前者を満たしても後者を満たすとは限らない——今回の3所見がその
+実例。「GTスライドがスパースであること」はglycogen/ground glassの
+必要条件だったが、十分条件ではなかった。
+
+留保: 判定者は病理の専門家ではない(この点はglycogenの91%が
+positive controlとして機能した実績が前提)。専門家なら見分けられる所見が
+ここに含まれる可能性はゼロではないが、hypertrophyの前例に倣い、この
+非専門家判定の否定結果をもって3所見とも一旦棚上げとする。
+
+→ glycogen・ground glassに続く3例目は依然見つかっていない。次の一手は
+track A(既存2所見の成果物としての完成度を上げる)に集中する。
+
 ## 次の一手(成果物トラック)
 
-1. **glycogen deliver の137枚(job 9701)を病理知識のある人にレビューしてもらう** —
+1. **glycogen deliver の137枚を病理知識のある人にレビューしてもらう** —
    採用率・多様性・所見レンジのカバー。GT スライドを全除外して未ラベルスライドだけから
    組んだ集合なので、「本当にグリコーゲン沈着か」がそのまま成果物の妥当性になる。
    ランダム対照で「検索が何かを選別している」ことは確認済み(判定精度91%)なので、
-   残る問いは「選別しているそれがグリコーゲン沈着か」に絞られた
+   残る問いは「選別しているそれがグリコーゲン沈着か」に絞られた。
+   **【2026-09-18】** レビューしやすい形として、背景除去済み(`experiments/0019`)の
+   137枚をスライド別にグルーピングしNNLアトラス参照図版と並べて見られるローカル
+   HTMLギャラリー(`outputs/pathology_review_2026-09-18/glycogen.html`)を作成済み。
+   病理専門家によるレビューは依然未実施(見込みなし、下記参照)
 2. **ground glass deliver の113枚も病理レビューに回す** — 2例目の「機能する所見」
-   (判定精度91%・recall 100%)。glycogen と同じく未ラベルスライドのみから組んだ集合
+   (判定精度91%・recall 100%)。glycogen と同じく未ラベルスライドのみから組んだ集合。
+   **【2026-09-18】** 同様にローカルHTMLギャラリー
+   (`outputs/pathology_review_2026-09-18/ground_glass.html`)を作成済み
+   (NNLアトラスにこの所見専用の掲載図版が無いため参照図版なし)。病理専門家による
+   レビューは依然未実施
 3. ~~**背景パッチをコーパスから落とす**~~ **(2026-09-09 完了、`experiments/0017`→`0018`)** —
    `sat_frac < 0.10` の背景 389,959 枚(2.12%)を manifest から除外し索引を再構築(GPU 不要)。
    `_is_blank_tile` もクエリ側で同基準に統一。max_similarity ランキングの自己検索順位は
