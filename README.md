@@ -2590,8 +2590,8 @@ finding_routing表)ほど下流の実験全体の前提になっているため�
 | 4 | 0019 | 背景除去後のdeliver再実行 | single_finding直接 | glycogen/ground glassは0058で確認済み。granular eosinophilicは未確認 |
 | 5 | ~~0022~~・**0023** | 倍率補正の検証・決着 | ~~0022は誤検出(所見ラベル不使用の合成自己参照テスト)~~ / 0023はsingle_finding+GT直接 | **完了(2026-09-18、experiments/0059)**: 結論は変化なし、むしろ補強された。下記参照 |
 | 6 | 0024・0025・0026 | 異方性除去(whiten)の構築・alphaスイープ | self_retrieval+GT両方 | **完了(2026-09-18、jobs 11004/11005)**: Kupffer cellのwhitenルーティングが薄いGTによる誤りと判明。下記参照 |
-| 7 | 0027 | atlas GT悪化の図版単位診断 | GT直接 | 中: 0028の直接の根拠 |
-| 8 | **0028** | **finding_routing.py本体の実装+検証** | GT直接(決定的) | **最高**: 今回Hypertrophy/Inclusion bodyの逆転が実証済み。全ルーティング表の再導出が必要 |
+| 7 | 0027 | atlas GT悪化の図版単位診断 | GT直接 | **完了(2026-09-18、experiments/0060)**: 0024〜0026の結論と整合。下記参照 |
+| 8 | 0028 | finding_routing.py本体の実装+検証(既存CSVの再集計) | GT直接(決定的) | **完了(2026-09-18、experiments/0061)**: Kupffer cell修正を反映して再集計。Inclusion bodyのwhiten vs macenko 3択比較が新たな残課題として判明 |
 | 9 | 0029・0030 | ルーティング適用のデモ・目視診断 | GT参照 | 0028が変われば自動的に対象所見が変わる |
 | 10 | **0031** | Fatty Changeのmacenko vs plain目視診断 | GT言及(旧GT0枚で定量評価不可だった) | **高**: 今回GT3枚が判明、初めて定量評価できる |
 | 11 | 0034 | macenkoルーティング先4所見の目視診断 | GT参照 | 0028が変われば対象所見が変わる |
@@ -2676,6 +2676,32 @@ abtt4は534に悪化))。
 3件目の「薄いGTサンプルに基づくルーティング誤り」。`WHITEN_FINDINGS`から
 `Proliferation, Kupffer cell`を外し baseline に戻すべきと判断する
 (`Necrosis`エントリは元々どの呼び出し元からも到達しない予約枠なので実害なし)。
+
+### experiments/0060・0061: 0027(図版単位診断)・0028(ルーティング再集計)を完全版GTで再実行(2026-09-18、jobs 11024/11026)
+
+チェックリストの3・4件目。0027(`scripts/atlas_per_image_diagnostic.py`に
+`--gt-csv`を追加)・0028(既存CSVの再集計のみ、新規計算なし)を、それぞれ完全版
+GTの入力に差し替えて再実行した。
+
+- **図版単位の結果(0060)は0024〜0026の所見単位の結論と完全に整合**: Kupffer
+  cellは唯一の図版でdelta_best=+59(baseline 13 → whiten 72、上記の逆転と一致)。
+  Hypertrophyは7図版中5枚でwhitenが悪化(delta最大+29)。悪化した図版は
+  39枚中20枚、上位4枚(悪化した図版の20%)が悪化幅合計の69%を占め、
+  「外れ値ではなく所見全体に広く効いている」という0027の結論に比べると
+  やや外れ値寄りの集中度に見える(0027は7カテゴリのみ・今回は35所見に拡大
+  しているため単純比較はできない)。
+- **0061はKupffer cellの修正後の`WHITEN_FINDINGS`(`Necrosis`のみ)を使って
+  再集計したため、自己検索・アトラスGTの両表でKupffer cellは正しく
+  baselineのまま**(routed=514/13、whitenの413/72より安全側)であることを確認。
+- **新たな警告(0061が自動検出)**: `Inclusion body, intracytoplasmic`について、
+  baseline/whitenの2択で見ると**whiten(図版単位中央値16.5)がbaseline(47.5)
+  より明確に優れている**。ただしこの所見は現在macenkoにルーティングされており
+  (この検証はbaseline/whitenの2択しか比較しないため見えない)、baseline対
+  macenkoの比較(experiments/0059、job 10996)ではbaseline=50・macenko=80で
+  baselineが勝っていた。**baseline・macenko・whitenを同一条件(所見単位クエリ、
+  図版単位)で3択直接比較できておらず、現状のmacenko採用が本当に最良かは
+  未確認**。次の一手として3択比較を検討する必要がある。
+
 
 ## 次の一手(成果物トラック)
 
