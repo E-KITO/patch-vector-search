@@ -2602,8 +2602,8 @@ finding_routing表)ほど下流の実験全体の前提になっているため�
 | 16 | 0045 | finding routed domain correction GTスイープ | GT直接 | 高: 0054・0055の前身データ |
 | 17 | 0046・0047・0048 | 同上の目視スイープ・文脈対照・候補プール分析 | single_finding | 中: 0048は「候補が枯れやすい」の原因分析、GT過小カウントと直接関係しうる |
 | 18 | **0051** | **macenkoスライド単位fit vs パッチ単位fitのGT評価(現行corpus選定の決め手)** | GT直接(決定的) | **最高**: 現行macenkoコーパスそのものの採否判断。**完了(2026-09-18、experiments/0063、job 11039)**: 結論不変(REGRESSED、slidefit不採用)。下記参照 |
-| 19 | 0054 | JPEG-shift補正のGT対応7所見alphaスイープ | GT直接 | 高: 直近の補正方針の根拠。**着手(2026-09-18、experiments/0064)**: 作成済み、投入待ち |
-| 20 | **0055** | 局所k近傍補正のGT対応7所見alphaスイープ(2件の空間逆転を発見) | GT直接 | **高**: 現在採用中の空間選択の最新根拠。**着手(2026-09-18、experiments/0065)**: 作成済み、投入待ち |
+| 19 | 0054 | JPEG-shift補正のGT対応7所見alphaスイープ | GT直接 | 高: 直近の補正方針の根拠。**完了(2026-09-18、experiments/0064、job 11040)**: 3所見で補正不要と判明。下記参照 |
+| 20 | **0055** | 局所k近傍補正のGT対応7所見alphaスイープ(2件の空間逆転を発見) | GT直接 | **高**: 現在採用中の空間選択の最新根拠。**完了(2026-09-18、experiments/0065、job 11041)**: 同様に3所見で補正不要と判明。下記参照 |
 | 21 | 0057 | GTの無い18所見の目視スイープ | GT参照(baseline文脈のみ) | 低: 結論(13/18が原理的に不可)はGT量に非依存とみられる |
 | 22 | 0058 | 3所見の追加deliver + ランダム対照 | 直接(本項の起点) | 完了。Swellingのみ9枚seedでの再deliverが残タスク |
 
@@ -2848,6 +2848,45 @@ Fatty Change追加で7→8所見になっているため、`gt_comparison.csv`�
   `lib.finding_routing.MACENKO_INDEX_DIR`)を変更する必要はない。slidefit
   (experiments/0050)への切替は完全版GTでも不採用が正しい判断と確認できた。
   `lib/finding_routing.py`の変更は不要。
+
+### experiments/0054・0055の再検証: ドメインギャップ補正alphaスイープを完全版GTで再実行(2026-09-18、experiments/0064・0065、jobs 11040/11041)
+
+チェックリスト項目19・20。それぞれ`gt_csv`のみ`full_finding_liver.csv`に
+差し替えたA/B(families・対象所見リストは変更せず、0054・0055オリジナルと
+完全に同一のまま)。**両実験ともnullかつ非常に一貫した新知見が得られた**:
+旧GT(GT枚数が少なかった所見)で「補正すると順位が大きく改善する」と
+出ていた所見のうち3つ(Single cell necrosis・Hematopoiesis, extramedullary・
+Hypertrophy)が、完全版GTでは**補正なしで既にbest_rank 1〜2まで到達しており、
+補正の必要が消滅した**(best_alpha=0.0に反転)。
+
+| 所見 | 旧GT(n_gt) base_best | 完全GT(n_gt) base_best | 0054 residual best_alpha(旧→新) | 0055 local best_alpha(旧→新) |
+|---|---|---|---|---|
+| Single cell necrosis | 4件, 14位 | 23件, **1位** | 0.5→**0.0** | 1.0→**0.0** |
+| Hematopoiesis, extramedullary | 3件, 28位 | 5件, **1位** | 0.25→**0.0** | 1.0→**0.0** |
+| Hypertrophy | 25件, 18位 | 53件, **2位** | (0054は元々macenko系でjpeg_shift/residualとも0.0のまま不変) | 0.2→**0.0** |
+| Deposit, glycogen | 6件, 7位(不変) | 6件, 7位(不変) | 0.5→0.5(不変) | 0.0→0.0(不変) |
+| Proliferation, Kupffer cell | 2件, 72位 | 5件, 72位(不変) | 1.0→1.0(残差)/0.1→0.1(jpeg)不変 | 0.5→0.5(不変) |
+| Increased mitosis | 10件, 1位(不変) | 19件, 1位(不変) | 0.0→0.0(不変) | 0.0→0.0(不変) |
+| Inclusion body, intracytoplasmic | 1件, 52位(不変) | 6件, 52位(不変) | 0.25→0.25(不変) | 0.75→0.75(不変) |
+
+- **解釈**: Single cell necrosis・Hematopoiesis・Hypertrophyの3所見は、旧GTの
+  枚数が極端に少なかった(それぞれ3〜4件、3件、25件)ため、GTスライドの
+  中にたまたま検索順位が悪いものが混じっており、それを補正alphaで「救って
+  いた」ように見えていた。完全版GT(5〜53件)でGT集合が広がると、素の検索
+  (alpha=0)で既にbest_rank 1〜2に到達することが分かり、**補正が必要だった
+  という結論自体が旧GTのサンプルサイズに起因するアーティファクトだった**
+  と判明した。
+- Deposit, glycogen・Kupffer cell・Increased mitosis・Inclusion bodyの
+  4所見は完全GTでもbest_alpha・rank_deltaが完全に不変——これらの所見に
+  ついては0045・0054・0055の補正効果の結論は頑健。
+- **production側への影響はない**: `domain_shift`・`jpeg_shift`・
+  `local_shift`いずれの補正も`lib/finding_routing.py`や本番の検索・deliver
+  パイプラインには組み込まれておらず、各実験の出力ディレクトリ内で完結する
+  探索的検証に留まっていた(`grep -rl "domain_shift\|jpeg_shift\|local_shift"
+  lib/ scripts/`が0件)。そのため今回の結果はコードの再修正ではなく、
+  「これらの補正手法は少なくともSingle cell necrosis・Hematopoiesis・
+  Hypertrophyには不要(むしろ有害、0055ではalpha増加で悪化)」という知見の
+  記録として扱う。
 
 ## 次の一手(成果物トラック)
 
