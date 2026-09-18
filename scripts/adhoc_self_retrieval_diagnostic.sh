@@ -21,8 +21,14 @@
 #       背景除去前の索引(experiments/0002)で回す。出力名に実験IDが付く
 #       (self_retrieval_diagnostic_0002.csv)ので既定の記録を上書きしない。
 #
+#   SRD_GT_CSV=data/processed_csv/full_finding_liver.csv
+#       単一所見フィルタ(既定の single_finding_liver.csv)を外した完全版GTで
+#       回す(2026-09-18、data/tggate_csv/ の生病理データから再構築)。
+#       出力名にファイル名が付く(self_retrieval_diagnostic_full_finding_liver.csv)。
+#
 #   sbatch scripts/adhoc_self_retrieval_diagnostic.sh
 #   SRD_INDEX_DIR=outputs/0002_20260808_build_faiss_index/default sbatch scripts/adhoc_self_retrieval_diagnostic.sh
+#   SRD_GT_CSV=data/processed_csv/full_finding_liver.csv sbatch scripts/adhoc_self_retrieval_diagnostic.sh
 
 set -euo pipefail
 
@@ -30,6 +36,7 @@ PROJECT_ROOT="/workspace/filesrv02/kito/patch-vector-search"
 
 RUN_ARGS=""
 if [ -n "${SRD_INDEX_DIR:-}" ]; then RUN_ARGS="${RUN_ARGS} --index-dir ${SRD_INDEX_DIR}"; fi
+if [ -n "${SRD_GT_CSV:-}" ]; then RUN_ARGS="${RUN_ARGS} --gt-csv ${SRD_GT_CSV}"; fi
 
 echo "Running scripts/self_retrieval_diagnostic.py on $(hostname) ..."
 echo "RUN_ARGS: ${RUN_ARGS}"

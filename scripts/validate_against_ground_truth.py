@@ -319,9 +319,14 @@ def rank_stats(ranked_df: pd.DataFrame, gt_slides: set[str]) -> dict:
 def run_comparison(
     pipelines: dict[str, tuple[PatchIndex, callable]] | None = None,
     nprobe: int = 64,
+    gt_csv: Path = GT_CSV,
 ) -> pd.DataFrame:
     """Args:
         pipelines: see default_pipelines().
+        gt_csv: GT table (image_id -> FINDING_TYPE). Default: single-finding-only
+            (GT_CSV). Pass data/processed_csv/full_finding_liver.csv for the
+            unfiltered table (individuals with >1 recorded finding are dropped
+            entirely from the single-finding table).
         nprobe: Number of IVF clusters to probe, forwarded to
             search_top_slides_multi. Default (64) matches the original
             fixed value this function always used. Raising it (up to
@@ -334,7 +339,7 @@ def run_comparison(
     if pipelines is None:
         pipelines = default_pipelines()
 
-    gt = pd.read_csv(GT_CSV)
+    gt = pd.read_csv(gt_csv)
     gt["slide_id"] = gt["image_id"].str.replace(".svs", "", regex=False)
     # Ground-truth slide membership is checked per-pipeline (each may run over a
     # different corpus/index with a different slide_id set), not shared globally.
@@ -406,6 +411,14 @@ if __name__ == "__main__":
     )
     ap.add_argument("--nprobe", type=int, default=64)
     ap.add_argument(
+        "--gt-csv",
+        type=Path,
+        default=GT_CSV,
+        help="GT table (image_id -> FINDING_TYPE). Default: %(default)s "
+        "(single-finding-only). Pass data/processed_csv/full_finding_liver.csv "
+        "for the unfiltered table.",
+    )
+    ap.add_argument(
         "--index-dir",
         type=Path,
         default=None,
@@ -434,7 +447,7 @@ if __name__ == "__main__":
     else:
         pipelines = default_pipelines()
 
-    df = run_comparison(pipelines, nprobe=args.nprobe)
+    df = run_comparison(pipelines, nprobe=args.nprobe, gt_csv=args.gt_csv)
     args.out.parent.mkdir(exist_ok=True)
     df.to_csv(args.out, index=False)
     print(f"\nwrote {args.out}")

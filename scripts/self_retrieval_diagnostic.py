@@ -162,15 +162,28 @@ def main() -> None:
         "with the experiment id appended for any other --index-dir so an A/B run "
         "does not overwrite it (e.g. self_retrieval_diagnostic_0002.csv).",
     )
+    ap.add_argument(
+        "--gt-csv",
+        type=Path,
+        default=GT_CSV,
+        help="GT table (image_id -> FINDING_TYPE). Default: %(default)s "
+        "(single-finding-only). Pass data/processed_csv/full_finding_liver.csv "
+        "for the unfiltered table (includes individuals with >1 recorded "
+        "finding, which single_finding_liver.csv drops entirely).",
+    )
     args = ap.parse_args()
 
     if args.out is not None:
         out_path = args.out
-    elif args.index_dir == INDEX_EXP_DIR:
+    elif args.index_dir == INDEX_EXP_DIR and args.gt_csv == GT_CSV:
         out_path = OUT_PATH
     else:
-        exp_tag = args.index_dir.parent.name.split("_")[0] or "alt"
-        out_path = OUT_PATH.with_name(f"{OUT_PATH.stem}_{exp_tag}.csv")
+        tags = []
+        if args.index_dir != INDEX_EXP_DIR:
+            tags.append(args.index_dir.parent.name.split("_")[0] or "alt")
+        if args.gt_csv != GT_CSV:
+            tags.append(args.gt_csv.stem)
+        out_path = OUT_PATH.with_name(f"{OUT_PATH.stem}_{'_'.join(tags)}.csv")
 
     rng = np.random.default_rng(SEED)
     pi = load_v1_index(args.index_dir)
@@ -179,7 +192,7 @@ def main() -> None:
     n_corpus = len(pi.slide_meta)
     corpus_slides = set(pi.slide_meta.index.astype(str))
 
-    gt = pd.read_csv(GT_CSV)
+    gt = pd.read_csv(args.gt_csv)
     gt["slide_id"] = gt["image_id"].str.replace(".svs", "", regex=False)
     gt = gt[gt["slide_id"].isin(corpus_slides)].copy()
     gt["group_key"] = gt["EXP_ID"].astype(str) + "_" + gt["GROUP_ID"].astype(str)

@@ -24,8 +24,13 @@
 #   VGT_OUT=outputs/gt_validations/gt_validation_results_deblank_ab.csv
 #       出力先。既定は outputs/gt_validation_results.csv(上書きされる)。
 #       退避が必要なら別名を渡すこと。
+#   VGT_GT_CSV=data/processed_csv/full_finding_liver.csv
+#       単一所見フィルタ(既定の single_finding_liver.csv)を外した完全版GTで
+#       回す(2026-09-18、data/tggate_csv/ の生病理データから再構築)。
+#       VGT_OUT と併用して出力先を別名にすること(既定のまま重ねると上書きされる)。
 #
 #   VGT_PIPELINES=baseline_v1,v1_predeblank VGT_OUT=outputs/gt_validations/gt_validation_results_deblank_ab.csv sbatch scripts/adhoc_validate_against_ground_truth.sh
+#   VGT_GT_CSV=data/processed_csv/full_finding_liver.csv VGT_OUT=outputs/gt_validations/gt_validation_results_full_finding_liver.csv sbatch scripts/adhoc_validate_against_ground_truth.sh
 
 set -euo pipefail
 
@@ -34,6 +39,7 @@ PROJECT_ROOT="/workspace/filesrv02/kito/patch-vector-search"
 RUN_ARGS=""
 if [ -n "${VGT_PIPELINES:-}" ]; then RUN_ARGS="${RUN_ARGS} --pipelines ${VGT_PIPELINES}"; fi
 if [ -n "${VGT_OUT:-}" ]; then RUN_ARGS="${RUN_ARGS} --out ${VGT_OUT}"; fi
+if [ -n "${VGT_GT_CSV:-}" ]; then RUN_ARGS="${RUN_ARGS} --gt-csv ${VGT_GT_CSV}"; fi
 
 echo "Running scripts/validate_against_ground_truth.py on $(hostname) ..."
 echo "RUN_ARGS: ${RUN_ARGS}"
