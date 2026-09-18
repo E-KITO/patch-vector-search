@@ -61,14 +61,14 @@ def parse_index_dirs(spec: str) -> dict[str, Path]:
     return out
 
 
-def run(index_dirs: dict[str, Path], nprobe: int = 64) -> pd.DataFrame:
+def run(index_dirs: dict[str, Path], nprobe: int = 64, gt_csv: Path = GT_CSV) -> pd.DataFrame:
     print(f"loading {len(index_dirs)} indices: {list(index_dirs)}", flush=True)
     indices = {name: load_index(p) for name, p in index_dirs.items()}
     any_index = next(iter(indices.values()))
     corpus_slide_ids = set(any_index.slide_meta.index.astype(str))
     n_slides = len(corpus_slide_ids)
 
-    gt = pd.read_csv(GT_CSV)
+    gt = pd.read_csv(gt_csv)
     gt["slide_id"] = gt["image_id"].str.replace(".svs", "", regex=False)
 
     rows = []
@@ -110,9 +110,17 @@ if __name__ == "__main__":
     )
     ap.add_argument("--out", type=Path, default=Path("outputs/atlas_per_image_diagnostic.csv"))
     ap.add_argument("--nprobe", type=int, default=64)
+    ap.add_argument(
+        "--gt-csv",
+        type=Path,
+        default=GT_CSV,
+        help="GT table (image_id -> FINDING_TYPE). Default: %(default)s "
+        "(single-finding-only). Pass data/processed_csv/full_finding_liver.csv "
+        "for the unfiltered table.",
+    )
     args = ap.parse_args()
 
-    df = run(parse_index_dirs(args.index_dirs), nprobe=args.nprobe)
+    df = run(parse_index_dirs(args.index_dirs), nprobe=args.nprobe, gt_csv=args.gt_csv)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(args.out, index=False)
     print(f"\nwrote {args.out}")
