@@ -2535,6 +2535,83 @@ positive controlとして機能した実績が前提)。専門家なら見分け
 → glycogen・ground glassに続く3例目は依然見つかっていない。次の一手は
 track A(既存2所見の成果物としての完成度を上げる)に集中する。
 
+## GTソースの根本的な過小カウントが判明(2026-09-18) — 全GT依存実験の再検証チェックリスト
+
+0058の直後、「コーパス内の非seedスライドにも本当は何らかの所見記録があるのでは」
+というユーザー指摘をきっかけに、研究室NASのOpen TG-GATEs生データ
+(`data/tggate_csv/corrected/open_tggates_pathology.csv` +
+`open_tggates_pathological_image.csv`)を初めてこのプロジェクトに導入した。
+
+**発覚した問題**: このプロジェクトが唯一のGTソースとして使ってきた
+`data/processed_csv/single_finding_liver.csv`は、「その個体に所見が
+1種類しか記録されていない」場合だけを拾うフィルタ済みテーブルで、
+**併発所見を持つ個体を丸ごと除外**していた。生データから単一所見フィルタを
+外した完全版`data/processed_csv/full_finding_liver.csv`(2026-09-18生成、
+`data/`配下なのでgit管理外・既存single_finding_liver.csvの2476件を完全再現
+することを検証済み)と比較すると、所見によってはコーパスGTスライド数が
+**最大5〜6倍**取りこぼされていた(Cellular infiltration 7→25枚、Single cell
+necrosis 4→23枚、Vacuolization cytoplasmic 2→13枚、Hypertrophy 25→53枚等。
+詳細は上記「experiments/0058」の表)。**Fatty Change(Degeneration, fatty)は
+「コーパスGT 0枚」としていたが実際は3枚存在**しており、「現行コーパスでは
+実行不可能」という結論(README各所)も誤りだった。
+
+`self_retrieval_diagnostic.py`・`validate_against_ground_truth.py`は両方とも
+このGTソース1本に依存しており(`--gt-csv`オプションを追加、既定は変更なし、
+commit参照)、2026-09-18にjobs 10995/10996で完全版GTによる再実行を行った結果:
+
+- **Cellular infiltration・Microgranulomaで新たにバッチ交絡が検出された**
+  (batch_dominates_finding_rate 0.0/測定不能 → 0.5/1.0)。旧データではバッチ
+  対照クエリが0〜1件しか作れず「交絡なし」に見えていただけだった。今回の
+  ランダム対照不成立(判定精度50%/49%)と独立に一致する結果。
+- **Swellingは完全データでも自己検索の数値が不変**(順位8.0・バッチ支配0.0の
+  まま)。deliverの失敗はGT7枚(実際は9枚使えた)による候補プールの薄さが
+  原因の可能性があり、再挑戦の価値がある。
+- **finding_routing.py(所見ごとのmacenko/whiten採用表)の一部が、極端に薄い
+  GTサンプルに基づく判断だった**: Hypertrophyはbaseline best 30→**1**
+  ・macenko 19→2で逆転、Inclusion body, intracytoplasmicはGTがわずか**1枚**
+  から6枚になりbaseline best 475→50・macenko 97→80で逆転。Increased mitosis
+  のmacenko優位(best=1、旧新で完全に不変)だけが頑健に確認された。
+
+### 全GT依存実験の一覧(コード上の参照を機械的に洗い出し、時系列順)
+
+`grep`で`single_finding_liver` / `GT_CSV` / `validate_against_ground_truth` /
+`self_retrieval_diagnostic` / `gt_validation`への参照を全実験ディレクトリから
+検出した(担当スクリプトが実際にGTテーブルを読む箇所のみ、コメントでの
+言及のみのものは除外して判断)。**上流の決定(倍率補正・whiten採用・
+finding_routing表)ほど下流の実験全体の前提になっているため、ユーザー提案
+どおり時系列(古い方)から潰していくのが合理的** — 上流が変われば下流の
+再実行要否自体が変わりうる。
+
+| 順 | 実験 | 内容 | GT依存の種類 | 優先度の理由 |
+|---|---|---|---|---|
+| 1 | 0014 | アトラスseed版deliver(否定的、ドメインギャップ発見) | single_finding直接(seed/exclude) | glycogen GTは6→6で不変。再検証の実利は低いが起点として記録 |
+| 2 | 0015 | コーパスseed版deliver(glycogen成立) | single_finding直接 | 同上(0058で既に部分再検証済み) |
+| 3 | 0016 | クエリ埋め込み経路の交絡切り分け | self_retrieval+single_finding | 低(結論は経路自体の話でGT量に非依存の可能性) |
+| 4 | 0019 | 背景除去後のdeliver再実行 | single_finding直接 | glycogen/ground glassは0058で確認済み。granular eosinophilicは未確認 |
+| 5 | **0022・0023** | 倍率補正の検証・決着 | self_retrieval / single_finding+GT | **高**: 「倍率補正は棚上げ」という早期の核となる決定。自己検索の天井を参照基準にしている |
+| 6 | **0024・0025・0026** | 異方性除去(whiten)の構築・alphaスイープ | self_retrieval+GT両方 | **高**: whiten採用の可否判断の根拠。finding_routingの前提 |
+| 7 | 0027 | atlas GT悪化の図版単位診断 | GT直接 | 中: 0028の直接の根拠 |
+| 8 | **0028** | **finding_routing.py本体の実装+検証** | GT直接(決定的) | **最高**: 今回Hypertrophy/Inclusion bodyの逆転が実証済み。全ルーティング表の再導出が必要 |
+| 9 | 0029・0030 | ルーティング適用のデモ・目視診断 | GT参照 | 0028が変われば自動的に対象所見が変わる |
+| 10 | **0031** | Fatty Changeのmacenko vs plain目視診断 | GT言及(旧GT0枚で定量評価不可だった) | **高**: 今回GT3枚が判明、初めて定量評価できる |
+| 11 | 0034 | macenkoルーティング先4所見の目視診断 | GT参照 | 0028が変われば対象所見が変わる |
+| 12 | 0035・0036・0037 | OvR分類器によるタイル事前重み付け | self_retrieval+single_finding+GT | 中〜高: OvR学習データがGT由来。「全所見一律1.0」という null 結果がGT不足の産物でないか要確認 |
+| 13 | 0038 | atlas vs corpusドメインギャップの定量化 | single_finding+GT | 中 |
+| 14 | 0039・0040 | ドメインギャップ線形補正の構築・alphaスイープ | single_finding+GT | 中〜高: 0041以降の前提 |
+| 15 | 0041・0042 | macenko+線形補正の全所見目視検証 | single_finding+GT | 中 |
+| 16 | 0045 | finding routed domain correction GTスイープ | GT直接 | 高: 0054・0055の前身データ |
+| 17 | 0046・0047・0048 | 同上の目視スイープ・文脈対照・候補プール分析 | single_finding | 中: 0048は「候補が枯れやすい」の原因分析、GT過小カウントと直接関係しうる |
+| 18 | **0051** | **macenkoスライド単位fit vs パッチ単位fitのGT評価(現行corpus選定の決め手)** | GT直接(決定的) | **最高**: 現行macenkoコーパスそのものの採否判断 |
+| 19 | 0054 | JPEG-shift補正のGT対応7所見alphaスイープ | GT直接 | 高: 直近の補正方針の根拠 |
+| 20 | **0055** | 局所k近傍補正のGT対応7所見alphaスイープ(2件の空間逆転を発見) | GT直接 | **高**: 現在採用中の空間選択の最新根拠 |
+| 21 | 0057 | GTの無い18所見の目視スイープ | GT参照(baseline文脈のみ) | 低: 結論(13/18が原理的に不可)はGT量に非依存とみられる |
+| 22 | 0058 | 3所見の追加deliver + ランダム対照 | 直接(本項の起点) | 完了。Swellingのみ9枚seedでの再deliverが残タスク |
+
+**未着手**: 上表のうち実際に完全版GTで再実行したのは自己検索診断・
+アトラスGT検証の「素の再計測」(今回のjobs 10995/10996)のみ。表中の各実験
+固有のスクリプト(alphaスイープ、ルーティング表の再導出等)はまだ何も
+再実行していない。
+
 ## 次の一手(成果物トラック)
 
 1. **glycogen deliver の137枚を病理知識のある人にレビューしてもらう** —
