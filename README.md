@@ -2595,7 +2595,7 @@ finding_routing表)ほど下流の実験全体の前提になっているため�
 | 9 | 0029・0030 | ルーティング適用のデモ・目視診断 | GT参照 | **完了(2026-09-18)**: 既存データの3択比較で対象所見の妥当性を再確認。下記参照 |
 | 10 | 0031 | Fatty Changeのmacenko vs plain目視診断 | GT言及(旧GT0枚で定量評価不可だった) | **完了(2026-09-18)**: CATEGORIES追加により初の定量評価。macenkoルーティングが誤りと判明・修正。下記参照 |
 | 11 | 0034 | macenkoルーティング先4所見の目視診断 | GT参照 | **完了(2026-09-18)**: Inclusion bodyのmacenkoルーティングが誤りと判明・修正。下記参照 |
-| 12 | 0035・0036・0037 | OvR分類器によるタイル事前重み付け | self_retrieval+single_finding+GT | 中〜高: OvR学習データがGT由来。「全所見一律1.0」という null 結果がGT不足の産物でないか要確認 |
+| 12 | 0035・0036・0037 | OvR分類器によるタイル事前重み付け | self_retrieval+single_finding+GT | **完了(2026-09-18、experiments/0062)**: Kupffer cell chance水準・Inclusion body高安定と判明。下記参照 |
 | 13 | 0038 | atlas vs corpusドメインギャップの定量化 | single_finding+GT | 中 |
 | 14 | 0039・0040 | ドメインギャップ線形補正の構築・alphaスイープ | single_finding+GT | 中〜高: 0041以降の前提 |
 | 15 | 0041・0042 | macenko+線形補正の全所見目視検証 | single_finding+GT | 中 |
@@ -2758,6 +2758,47 @@ whiten→baseline、Inclusion body・Fatty Change: macenko→whiten、Hypertroph
 差僅少で維持)。`MACENKO_FINDINGS`に残るのはHypertrophy・Increased mitosisの
 2所見のみとなった。
 
+### experiments/0035〜0037の再検証: OvR分類器を完全版GTで再実行(2026-09-18、job 11031)
+
+チェックリストの12件目。`lib/ovr_scoring.py`は既に`config["gt_csv"]`経由でGT
+ソースを受け取る設計だったためコード変更不要——0036(CATEGORIES 7所見版、
+Hypertrophy単体の0035を包含)の`gt_csv`だけをfull_finding_liver.csvに
+差し替えて再実行した。0037(atlas画像を正例にするLOIO手法)は「ドメイン
+ギャップでAUROCが飽和し所見の難易度を反映しない」という結論がGTの完全性と
+無関係な指標そのものの限界のため再実行していない。
+
+| 所見 | 旧LOSO AUROC(fold数) | 新LOSO AUROC(fold数) |
+|---|---|---|
+| Hypertrophy | 0.660(0.10〜0.92、14fold) | 0.801(0.29〜0.97、**31fold**) |
+| Single cell necrosis | 0.842(3fold) | 0.939(**11fold**) |
+| Increased mitosis | 0.789(7fold) | 0.849(**14fold**) |
+| Deposit, glycogen | 0.960(4fold) | 0.960(4fold、不変) |
+| Hematopoiesis, extramedullary | 0.912(3fold) | 0.927(**5fold**) |
+| Proliferation, Kupffer cell | **LOSO不可(study1つ)** | **0.493(chance水準、2fold)** |
+| Inclusion body, intracytoplasmic | **LOSO不可(study1つ)** | **0.916(0.74〜0.97、4fold)** |
+
+**最大の発見: Kupffer cell と Inclusion body は、旧GTではstudy数が1つしかなく
+LOSO検証自体が不可能だったが、完全版GTで初めて検証できるようになった。**
+
+- **Proliferation, Kupffer cell: AUROC 0.493(完全な偶然水準)。** 分類器は
+  所見を全く学習できていない。これは自己検索診断のバッチ交絡
+  (`batch_dominates_finding_rate=1.0`、experiments/0024〜0026再検証)、
+  アトラスGTでのbaseline圧勝(13 vs whiten 72、同上)に続く、**3つ目の独立した
+  手法による「Kupffer cellは実質学習不能」の裏付け**。この所見はどの角度から見ても
+  一貫して機能しないと言える。
+- **Inclusion body, intracytoplasmic: AUROC 0.916(0.74〜0.97)と高く安定。**
+  4fold全てで0.74以上を維持しており、Hypertrophy(min 0.29)のような極端な
+  ブレが無い。whitenルーティングへの修正(best_rank 10、experiments/0029〜
+  0031・0034再検証)と合わせ、**この所見が実は真に有望である可能性を示す
+  初めてのポジティブな新情報**。glycogen・ground glassに続く3例目の成果物候補
+  として検討する価値がある(ただしatlas図版はわずか2枚、コーパスGTも6枚と
+  少ないままなので、成果物化にはランダム対照等の別検証が引き続き必要)。
+- **他の所見(Hypertrophy・Single cell necrosis・Increased mitosis・
+  Hematopoiesis)はfold数が2〜4倍に増えてAUROCの推定がより頑健になったが、
+  方向性(良い/悪い)自体は変わらなかった**。Hematopoiesisは相変わらずAUROCが
+  高いのにギャラリーは0→0のまま(「タイル識別の改善はスライド集計に伝播しない」
+  という0036の発見の再確認)。Hypertrophyはmin AUROCが依然低く(0.29)、
+  fold間の不安定性という既知の限界は残る。
 
 ## 次の一手(成果物トラック)
 
