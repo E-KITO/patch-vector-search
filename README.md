@@ -2601,7 +2601,7 @@ finding_routing表)ほど下流の実験全体の前提になっているため�
 | 15 | 0041・0042 | macenko+線形補正の全所見目視検証 | single_finding+GT | 中 |
 | 16 | 0045 | finding routed domain correction GTスイープ | GT直接 | 高: 0054・0055の前身データ |
 | 17 | 0046・0047・0048 | 同上の目視スイープ・文脈対照・候補プール分析 | single_finding | 中: 0048は「候補が枯れやすい」の原因分析、GT過小カウントと直接関係しうる |
-| 18 | **0051** | **macenkoスライド単位fit vs パッチ単位fitのGT評価(現行corpus選定の決め手)** | GT直接(決定的) | **最高**: 現行macenkoコーパスそのものの採否判断 |
+| 18 | **0051** | **macenkoスライド単位fit vs パッチ単位fitのGT評価(現行corpus選定の決め手)** | GT直接(決定的) | **最高**: 現行macenkoコーパスそのものの採否判断。**着手(2026-09-18、experiments/0063)**: 下記参照、結果待ち |
 | 19 | 0054 | JPEG-shift補正のGT対応7所見alphaスイープ | GT直接 | 高: 直近の補正方針の根拠 |
 | 20 | **0055** | 局所k近傍補正のGT対応7所見alphaスイープ(2件の空間逆転を発見) | GT直接 | **高**: 現在採用中の空間選択の最新根拠 |
 | 21 | 0057 | GTの無い18所見の目視スイープ | GT参照(baseline文脈のみ) | 低: 結論(13/18が原理的に不可)はGT量に非依存とみられる |
@@ -2799,6 +2799,23 @@ LOSO検証自体が不可能だったが、完全版GTで初めて検証でき�
   高いのにギャラリーは0→0のまま(「タイル識別の改善はスライド集計に伝播しない」
   という0036の発見の再確認)。Hypertrophyはmin AUROCが依然低く(0.29)、
   fold間の不安定性という既知の限界は残る。
+
+### experiments/0051の再検証: macenkoスライド単位fit vs パッチ単位fitを完全版GTで再評価(2026-09-18、experiments/0063)
+
+チェックリスト項目18。`experiments/0051`から`gt_csv`のみ
+`full_finding_liver.csv`に差し替えたA/B(index/features・pipelinesなど他は
+完全に同一)。0051は現行macenkoコーパス(experiments/0033、パッチ単位fit)を
+新規のスライド単位fit索引(experiments/0050)に切り替えるべきかを決めた実験で、
+0054・0055などmacenko空間を前提とする後続実験より上流にあるため、これらより
+先に再検証する。完全版GTでは`validate_against_ground_truth.CATEGORIES`が
+Fatty Change追加で7→8所見になっているため、`gt_comparison.csv`は8行/8所見を
+期待する(0051オリジナルは7所見のみで判定していた点に注意。Fatty Changeは
+現行ルーティングがwhitenであり本来macenko比較の対象外だが、CATEGORIES経由で
+自動的に8所見全部が評価されるため、Fatty Change行の扱いは判定時に除外するか
+確認が必要)。
+
+実行: `runx 63`(GPU 1、`small-creator-i`、既存索引を再利用するため軽量・
+1h想定)。結果待ち。
 
 ## 次の一手(成果物トラック)
 
