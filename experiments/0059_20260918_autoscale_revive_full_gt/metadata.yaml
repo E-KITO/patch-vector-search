@@ -1,0 +1,7 @@
+exp_id: 0059
+exp_name: 0059_20260918_autoscale_revive_full_gt
+created_date: 20260918
+git_commit: 4379704d8edfeaf0cde6349ba547400629f9aa55
+resumed_from_exp: 0023_20260910_autoscale_revive
+resume_checkpoint_dir: outputs/0023_20260910_autoscale_revive
+resume_checkpoint_file: null

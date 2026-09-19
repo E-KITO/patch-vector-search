@@ -1,0 +1,7 @@
+exp_id: 0066
+exp_name: 0066_20260918_swelling_redeliver_full_gt
+created_date: 20260918
+git_commit: 199334b0b82a290b1fb25037b610b2bb4cc76421
+resumed_from_exp: 0058_20260918_build_finding_patch_set_deblank_sparse_findings
+resume_checkpoint_dir: outputs/0058_20260918_build_finding_patch_set_deblank_sparse_findings
+resume_checkpoint_file: null

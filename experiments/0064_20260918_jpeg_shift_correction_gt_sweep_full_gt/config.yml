@@ -1,0 +1,71 @@
+# ============================================================
+# experiments/0064: 0054 を完全版GT(full_finding_liver.csv)で再実行するA/B
+# ============================================================
+# 2026-09-18: single_finding_liver.csv がプロジェクト全体の唯一のGTソース
+# だったと判明(README「GTソースの根本的な過小カウントが判明」)。0054は
+# experiments/0051(macenko slidefit vs patchfit、experiments/0063で完全GT
+# 再検証済み・結論不変)の直後の補正alphaスイープであり、gt_csvだけを
+# full_finding_liver.csvに差し替えたA/B(families・findingsの対象所見リストは
+# 0054オリジナルのまま変更しない——Fatty Changeはこの実験の設計時点で
+# CATEGORIESに存在しなかったため対象外のままで良い)。
+# ============================================================
+# 以下は0054オリジナルのコメント(狙い、変更なし):
+# ============================================================
+# experiments/0054: experiments/0053で切り分けたJPEG圧縮由来のドメインギャップ
+# 成分から補正ベクトル(jpeg_shift)を作り、GT対応7所見で実際に補正効果を
+# alphaスイープ検証する
+# ============================================================
+# 背景(ユーザー提案): experiments/0053は「同一パッチの生ピクセル埋め込み vs
+# JPEG往復後埋め込み」のペアで、JPEG圧縮だけがatlas-corpusドメインギャップの
+# 8〜34%(品質次第)を説明することを確認した。この差ベクトルは中身が完全に
+# 同一でJPEG往復の有無だけが違うため、experiments/0039・0041のdomain_shift
+# (atlas平均-corpus平均、生物学的要因とJPEG要因が混在)より純粋な「JPEG圧縮
+# だけの補正ベクトル」になっているはず、という仮説を検証する。
+#
+# 手順:
+#   1. atlas図版91枚(NNLアトラス25所見全フォルダ)のJPEGファイルから
+#      PILの量子化テーブル(IJG標準テーブルからの逆算)で実際の圧縮品質を
+#      推定する。この推定品質でJPEG-shiftベクトルを較正する。
+#   2. experiments/0053と同様にコーパスから生パッチ200枚(20スライド×10)を
+#      切り出し、(a) 生ピクセルのまま埋め込み (b) JPEG往復後に埋め込み、を
+#      plain空間・macenko空間(query側のnormalize_to_reference経由、
+#      experiments/0041のmacenko domain_shift構築と同じ空間)の両方で行う。
+#      品質は較正品質に加え[95,85,70,50]でもシフトベクトルを作り、品質間の
+#      方向一貫性(コサイン類似度)を確認する——一貫していなければ「単一
+#      方向をalphaでスケールする」線形補正の前提自体が崩れる。
+#   3. 較正品質のjpeg_shiftを使い、lib.finding_routingの実ルーティング空間
+#      (plain/whiten/macenko)でGT対応7所見のalphaスイープ(experiments/0045
+#      と同じ枠組み・found優先・best_rank改善で選定)を行う。
+#   4. 「domain_shift(0039/0041) - jpeg_shift」の残差ベクトル(=JPEG由来分を
+#      除いた後に残る生物学的/スキャナ由来と推定される成分)についても、
+#      粗いalphaグリッドで同様に検証する。domain_shift単独より残差の方が
+#      良ければ、JPEG成分を除去することの価値が裏付けられる。
+#
+# 出力(outputs/0054_.../default/):
+#   atlas_jpeg_quality_estimates.csv   atlas図版ごとの推定JPEG品質
+#   jpeg_shift_consistency.json        品質間・パッチ間の方向一貫性
+#   gt_comparison_{family}_jpegshift.csv / _residual.csv
+#   best_alpha_by_finding_jpegshift.json / _residual.json
+#   summary.json                       所見ごとのbest_rank比較まとめ
+# ============================================================
+
+seed: 42
+
+gt_csv: "data/processed_csv/full_finding_liver.csv"
+
+atlas_root: "data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver"
+atlas_figures_csv: "data/query/nnl_liver_atlas_figures.csv"
+
+index_dir: "outputs/0018_20260909_build_faiss_index_deblank/default"
+raw_slide_dir: "data/moo_collected_tggate_wsi/raw_wsi"
+
+tile_size: 224
+n_slides: 20
+n_patches_per_slide: 10
+jpeg_quality_candidates: [95, 85, 70, 50]
+
+domain_shift_plain_path: "outputs/0039_20260914_atlas_domain_shift_correction/default/domain_shift.npy"
+domain_shift_macenko_path: "outputs/0041_20260914_macenko_domain_correction_all_findings/default/domain_shift_macenko.npy"
+
+alphas: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+residual_alphas: [0.0, 0.25, 0.5, 0.75, 1.0]

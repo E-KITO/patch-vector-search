@@ -1,0 +1,24 @@
+# ============================================================
+# experiments/0061: 0028 を完全版GT(full_finding_liver.csv)の再集計結果で
+# 再実行するA/B
+# ============================================================
+# 2026-09-18: single_finding_liver.csv がプロジェクト全体の唯一のGTソース
+# だったと判明。0028自体は新規計算をしない再集計のみなので、入力3ファイルを
+# 完全版GTで再計算済みのものに差し替えるだけ:
+#   self_retrieval_* : jobs 11004(self_retrieval_diagnostic.py --gt-csv
+#     full_finding_liver.csv)の出力(outputs/gt_validations/)
+#   atlas_per_image   : experiments/0060(0027を完全版GTで再実行、要事前完了)
+# lib.finding_routing.WHITEN_FINDINGS は既にKupffer cellを外した後の値を使う
+# ことに注意(0024〜0026の再検証で判明した修正が反映済み)。
+# ============================================================
+# 以下は0028オリジナルのコメント(狙い、変更なし):
+# ============================================================
+# lib/finding_routing.py で確定させた所見ごとのルーティング表(baseline/whiten)が、
+# self_retrieval(0025)と atlas GT(0027)の両方で「良いとこ取り」になっているかを
+# 確認する。新規の索引構築・クエリ埋め込みは行わない — 既存の CSV を
+# WHITEN_FINDINGS で再集計するだけなので GPU 不要、この capsule 内でローカル実行できる。
+# ============================================================
+
+self_retrieval_baseline: "outputs/gt_validations/self_retrieval_diagnostic_full_finding_liver.csv"
+self_retrieval_whiten: "outputs/gt_validations/self_retrieval_diagnostic_whiten_v1_full_finding_liver.csv"
+atlas_per_image: "outputs/0060_20260918_atlas_outlier_diagnostic_full_gt/default/atlas_per_image.csv"

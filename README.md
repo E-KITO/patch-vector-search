@@ -2225,15 +2225,688 @@ smoke test→本番投入→自己一致性テスト→Macenko失敗パッチ監
 同じゲートを通す予定。features_dirが揃い自己一致性テストがPASSしたら
 連絡が来る想定——**この時点ではまだコーパスは出来ていない(実行待ち)**。
 
+**2026-09-16 追記(コーパス完成、GT検証まで完了)**: wsi_preprocess側から
+`trident_processed_uni_v1_macenko_slidefit`(全1000スライド・約1836万パッチ、
+73GB)が納品された。experiments/0049でmanifest構築時点でも1000/1000スライド
+分のh5が揃っていることを確認済み。これを受けた実検索性能でのA/B比較の結果は
+下記「experiments/0049〜0052」参照——**結論としてスライド単位fitへの切替は
+見送り、既存のパッチ単位fitコーパス(`trident_processed_uni_v1_macenko`)を
+本番のまま維持する**。
+
+## experiments/0049〜0052: Macenkoスライド単位fitコーパスの実検索性能A/B検証(パッチ単位vsスライド単位fitの最終判定)(2026-09-16、jobs 10826/10828/10834/10839)
+
+experiments/0043・0044の事前検証(torchstain単体での染色ベクトル安定性比較)で
+「スライド単位fitが正規化ノイズを一定程度減らす中程度の根拠」が得られたことを
+受け、wsi_preprocess側に依頼して全コーパスをスライド単位fitで再構築した
+(上記「wsi_preprocess連携」)。本セットの4実験で、その新コーパスが実際の
+GT best_rank・目視の両面で既存のパッチ単位fitコーパスを上回るかを検証した。
+
+- **experiments/0049**: 新コーパス(`features_uni_v1_macenko_slidefit`)に
+  experiments/0032と同じ背景除去(`sat_frac < 0.10`)を適用してmanifestを構築。
+  1000/1000スライド・17,981,963パッチ(背景386,372枚除外後)。12スライドは
+  背景blankness側のパッチ数とわずかにずれたため、該当スライドのみ背景除外を
+  スキップ(0032と同じ安全側フォールバック)。
+- **experiments/0050**: 0049のmanifestからFAISS索引を構築(GPU、既存
+  `experiments/0033`のMacenko索引作成ロジックをそのまま流用)。
+- **experiments/0051**: 本題のGT best_rank比較。`macenko_patchfit`
+  (既存、experiments/0033・本番採用中)と`macenko_slidefit`(新規、
+  experiments/0050)の2索引を、クエリ側埋め込み(atlas図版へのtorchstain
+  正規化・macenkoタイル埋め込み)は完全に同一に統制した上で、GT対応7所見
+  全部について比較した:
+
+  | 所見 | patchfit found | patchfit best | slidefit found | slidefit best |
+  |---|---|---|---|---|
+  | Hypertrophy | 25/25 | 18 | 25/25 | 35 |
+  | Single cell necrosis | 4/4 | 85 | 4/4 | 69 |
+  | Increased mitosis | 10/10 | 1 | 9/10 | 2 |
+  | Deposit, glycogen | 6/6 | 14 | 6/6 | 22 |
+  | Hematopoiesis, extramedullary | 3/3 | 83 | 3/3 | 51 |
+  | Proliferation, Kupffer cell | 1/2 | 873 | **0/2** | — |
+  | Inclusion body, intracytoplasmic | 1/1 | 52 | 1/1 | 15 |
+
+  改善は3所見(Single cell necrosis、Hematopoiesis, extramedullary、
+  Inclusion body, intracytoplasmic)、悪化は2所見(Hypertrophy、
+  Deposit, glycogen)。決定打は**Proliferation, Kupffer cell**で、
+  slidefitに切り替えるとGTスライド2枚のうち1枚が候補プールから完全に
+  消失した(found 1/2→0/2)。Increased mitosisも found が10/10→9/10へ
+  1枚脱落している。**verdict: REGRESSED(GTスライドが候補プールから
+  消失する所見があり、slidefitへの切替は非推奨)**。
+- **experiments/0052**: GT対応7所見全部で目視ギャラリー診断(top5比較)を
+  追加実施。全所見でtop5の顔ぶれが変わり(`top_slides_changed: True`)、
+  ギャラリー生成数もmacenko_patchfit側が総じて多い(例: Deposit, glycogen
+  2枚→0枚、Hematopoiesis 1枚→0枚)。0051のGT数値と整合する結果で、
+  「slidefitが視覚的にも優れている」という裏付けは得られなかった。
+- **結論**: experiments/0043・0044の事前検証で示唆された「スライド単位fitで
+  正規化ノイズが減る」という仮説は、実際のGT検索性能では裏付けられなかった。
+  むしろKupffer cellのようにGTスライド自体が候補プールから消える所見がある
+  ため、**パッチ単位fit(既存`trident_processed_uni_v1_macenko`)を本番のまま
+  維持する**。`trident_processed_uni_v1_macenko_slidefit`コーパス・索引は
+  この検証記録として保持するが、`lib.finding_routing`等の本番経路は変更しない。
+
+## experiments/0053: ドメインギャップの「拡張子(JPEG圧縮)」交絡を切り分ける(2026-09-17、job 10871)
+
+ユーザー指摘: experiments/0038で確認されたatlas vs corpusドメインギャップ
+(所見によらずスコア差10〜12、上記「experiments/0038」参照)は、これまで
+「スキャナ・染色・解像度・図版特有のノイズ」とだけ説明されていたが、atlas
+図版は全て`.jpg`(`lib.ovr_scoring.embed_atlas_images_as_positives`が
+`PIL.Image.open`でロード)である一方、corpusパッチは`.svs`から直接切り出した
+生ピクセルをwsi_preprocessでUNI埋め込みしたh5を読むだけでJPEG圧縮を一度も
+経由しない——この「拡張子(画像パイプライン)の違い」自体が交絡していないか
+は一度も切り分けられていなかった(experiments/0044の設計メモで同種の懸念が
+別の比較軸で指摘されていたのと同じ論点)。
+
+0038と同じ手順(atlas図版タイル vs コーパスランダムパッチの二値ロジスティック
+回帰)でドメイン分類器を再学習し(プローブ用の20スライドは負例プールの
+サンプリング元から除外してリークを回避)、コーパスから新たに切り出した200
+パッチ(20スライド×10パッチ、`lib.raw_patch.crop_patch`)について、
+(a) 生ピクセルのままUNI埋め込み(現行corpusパイプラインと同一経路)と
+(b) 同じピクセルをJPEG品質95/85/70/50で往復させてから同じ埋め込み、を
+この分類器でスコアして比較した。
+
+- **サニティチェックはPASS**: (a)の再埋め込みは既存corpus h5特徴量と
+  cos_sim中央値0.9999987(README「Tier 1 roundtrip」と同水準)で一致——
+  再埋め込みパイプライン自体の妥当性が確認され、以下のシフト量の解釈は有効。
+- **JPEG往復だけで、品質に応じて単調にatlas側へシフトする**:
+
+  | JPEG品質 | 平均シフト | atlas-corpusギャップに対する割合 | cos(生 vs JPEG) | 分類境界を越えた数 |
+  |---|---|---|---|---|
+  | 95(ほぼ非可逆最高品質) | +0.95 | 8.3% | 0.947 | 0/200 |
+  | 85 | +2.70 | 23.8% | 0.813 | 1/200 |
+  | 70 | +3.21 | 28.3% | 0.731 | 1/200 |
+  | 50(強め圧縮) | +3.82 | 33.7% | 0.662 | 2/200 |
+
+  品質95という「ほぼ非可逆」設定でもUNI埋め込み空間ではcos類似度0.947まで
+  動く——UNIの埋め込みは見た目以上にJPEG圧縮に敏感。
+- **結論(0038への回答)**: 拡張子(JPEG圧縮)は、atlas-corpusドメインギャップの
+  **無視できない一因ではあるが、単独の主犯ではない**。実際のatlas図版の
+  JPEG品質は不明だが、最も強く見積もっても(品質50)ギャップの3割強までしか
+  説明できず、残り3分の2以上は依然としてスキャナ・染色・解像度など拡張子
+  以外の要因に帰属する。したがって、experiments/0038以降の「線形補正・
+  macenko等の染色ベクトル側の対策では埋まらない部分がある」という見立ては
+  維持されるが、**その埋まらない部分の一部(実際の品質次第で1割弱〜3割強)は
+  JPEG圧縮由来である可能性が高い**——線形補正の効果に天井がある理由の
+  一端を説明する追加証拠。
+- 実験内の自動判定ロジック(`summary.json`の`verdict`)は「品質50でギャップの
+  30%超」を機械的な閾値として「拡張子が主要因」とラベル付けしているが、
+  上記の通り3割強は主要因と呼べる水準ではなく、この閾値は参考程度に留める
+  こと(人間の解釈では「無視できない一因、主犯ではない」が正確)。
+
+## experiments/0054: JPEG-shift補正ベクトルの構築とGT対応7所見でのalphaスイープ検証(2026-09-17、job 10880)
+
+experiments/0053で切り分けた「JPEG圧縮だけの差ベクトル」は、experiments/0039・
+0041のdomain_shift(atlas平均-corpus平均、生物学的要因とJPEG要因が混在)より
+純粋な補正ベクトルになっているはず、という仮説(ユーザー提案)を検証した。
+atlas図版91枚の量子化テーブルから実際のJPEG品質を推定して較正し、その品質で
+jpeg_shiftベクトルを構築、finding_routingの実ルーティング空間(plain/whiten/
+macenko)でGT対応7所見のalphaスイープ(experiments/0045と同じ枠組み)を行った。
+domain_shift-jpeg_shiftの残差ベクトルについても粗いグリッドで検証した。
+
+- **atlas実測品質は87/87件が推定上限の100(ほぼロスレス)**——experiments/0053で
+  試した品質50(最悪ケース)とは大きく異なり、実際のatlas画像はかなり高品質な
+  JPEGだった。
+- **較正後のjpeg_shiftの大きさはdomain_shiftの22〜31%**(plain空間ノルム比
+  0.197/0.631=31%、macenko空間0.140/0.629=22%)——無視できるほど小さくはない。
+- **しかし品質間の方向一貫性に問題がある**: 近い品質同士(Q50 vs Q70、Q95 vs
+  Q100)はコサイン類似度0.80〜0.97で方向が揃うが、遠い品質同士(**Q50 vs
+  Q100はplain 0.326・macenko 0.449**)では方向が大きく変わる。experiments/0053
+  で得た品質50相当のシフト方向と、実際のatlas画像(品質100)のシフト方向は
+  別方向を向いており、「単一方向をalphaでスケールする」線形補正の前提
+  (domain_shiftが所見によらずほぼ一定方向だったのと同種の前提)が、jpeg_shift
+  については品質を跨ぐと崩れる。
+- **GT対応7所見での効果**:
+  - jpeg_shift単独: 7所見中5所見でbest_alpha=0.0(効果ゼロ)。Kupffer cellのみ
+    alpha=0.1でrank 72→71のごくわずかな改善。
+  - 残差(domain_shift-jpeg_shift) vs domain_shift単独(experiments/0045):
+
+    | 所見 | domain_shift単独(0045) | residual(0054) |
+    |---|---|---|
+    | Single cell necrosis | alpha=0.5, Δ=-11 | alpha=0.5, Δ=-12 |
+    | Deposit, glycogen | alpha=0.5, Δ=-2 | alpha=0.5, Δ=-1 |
+    | Hematopoiesis | alpha=0.2, Δ=-7 | alpha=0.25, Δ=-7 |
+    | Proliferation, Kupffer cell | alpha=0.35, Δ=-21 | **alpha=1.0, Δ=-29** |
+    | Hypertrophy | alpha=0.1, Δ=-7 | **alpha=0.0, Δ=0** |
+    | Increased mitosis | alpha=0.0, Δ=0 | alpha=0.0, Δ=0 |
+    | Inclusion body | alpha=0.25, Δ=-11 | alpha=0.25, Δ=-11 |
+
+    Kupffer cellは明確に改善(alpha=1.0が探索範囲の上限なのでさらに伸びる余地
+    あり)、Hypertrophyはdomain_shiftが持っていた改善効果が完全に消失、
+    残り4所見はほぼ同等。
+- **結論**: JPEG-shift単独の補正は実用的価値が無い(較正品質がほぼロスレスの
+  ため、シフト自体が弱く方向も不安定)。残差(domain_shift-jpeg_shift)は
+  domain_shift単独に対して一貫した優位性が無く、所見依存で明暗が分かれる
+  (Kupffer cellには効くがHypertrophyには逆効果)——「線形補正は所見依存で
+  明暗が分かれ一律適用はできない」というこのプロジェクトの繰り返しの教訓
+  (experiments/0037・0039・0040・0041)が、JPEG成分を除いた残差補正でも同様に
+  成立した。**domain_shiftを残差に置き換える理由は無い**。Kupffer cell
+  (whiten空間)限定でalpha=1.0超の残差補正を追試する価値はある程度の知見に
+  留まる。
+
+## experiments/0055〜0057: 局所k近傍補正(local domain shift)と空間選択の同時探索(2026-09-17、jobs 10941/10945/10956)
+
+experiments/0045・0054のグローバルな線形補正(domain_shift・jpeg_shift・
+その残差)は所見ごとに効果がバラバラ(Kupffer cellには効くがHypertrophyには
+逆効果)だった。「1本のグローバルな方向」が所見によって欲しい補正の向きが
+異なるのではないか(ユーザー提案)という仮説を受け、補正方向をクエリの
+埋め込み位置ごとに局所的に決める手法と、そもそも所見ごとの空間選択
+(plain/whiten/macenko)自体を補正込みで見直すべきではないかという論点を、
+GT対応7所見・GTの無い18所見の両方について検証した。
+
+### experiments/0055: 局所k近傍補正をGT対応7所見でalphaスイープ(job 10941)
+
+atlasプール(91枚全タイル、自己一致除外用に由来画像id付き)とcorpusプール
+(3万パッチ)をplain/macenko両空間で構築し、クエリタイルごとにatlasプール・
+corpusプールそれぞれのコサイン類似度top-k(k=50)近傍の平均差を
+「そのタイル固有の補正方向」とする局所補正を、finding_routingの実
+ルーティング空間でGT対応7所見にalpha=0.0〜1.0でスイープした。
+
+- **experiments/0045のグローバルdomain_shiftとの比較**: Hematopoiesis
+  (Δ=-7→**-20**)とInclusion body(Δ=-11→**-29**)でグローバル補正より
+  大幅に改善する一方、Single cell necrosis(Δ=-11→-4)とKupffer cell
+  (Δ=-21→-8)は逆に弱くなった。ただし**Hypertrophyは依然として改善
+  (Δ=-5)を維持**しており、experiments/0054の残差補正がHypertrophyの
+  改善効果を完全に消した(Δ=0)のとは対照的——局所補正は所見によって
+  グローバル補正より強い/弱いはあるが、悪化させて改善効果をゼロにする
+  という壊滅的な失敗モードは起きていない(7所見全部が改善か中立)。
+- **空間選択自体の見直し(ユーザー指摘への回答)**: `run_comparison`は
+  family(空間)を絞らず3空間×全alphaを計算しているため、追加実験なしで
+  「所見Xを現行ルーティングと違う空間に置いたらどうなるか」を検証できた。
+  7所見中5所見(Hypertrophy・Single cell necrosis・Increased mitosis・
+  Hematopoiesis・Inclusion body)は局所補正込みでも現行ルーティングが
+  引き続き最良だったが、**2所見で逆転**した:
+
+  | 所見 | 現行 | plain+局所補正 | whiten+局所補正 | macenko+局所補正 |
+  |---|---|---|---|---|
+  | Deposit, glycogen | plain(best=7) | 7 | **4** | 11 |
+  | Proliferation, Kupffer cell | whiten(best=64) | **57** | 64 | 335(GT消失あり) |
+
+  空間選択とalpha補正は本来同時に探索すべき変数だった、というユーザーの
+  指摘が具体的な数値で裏付けられた。
+
+### experiments/0056(フェーズA): 全25所見×3空間の軽量数値スイープで発覚した罠(job 10945)
+
+GT対応7所見にとどまらずNNLアトラス全25所見についても同じ検証を行いたい
+(ユーザー提案)が、GTが無いため判断材料は目視にせざるを得ない。画像生成
+コストを抑えるため、まず画像を生成しない軽量な数値指標(`search_top_slides_multi`
+のtop3平均類似度)で975通り(25所見×3空間×13alpha)をスクリーニングした。
+
+- **全25所見で一様に「alpha=1.0が最良、macenko空間でスコアが25〜108%
+  上昇」という結果になり、これが罠だと判明した**。局所補正は
+  「クエリ自身に最も近いk個のcorpusパッチの平均」を引く仕組みのため、
+  alpha=1.0に近づけるほどクエリベクトルはその近傍corpusパッチの重心
+  そのものに近づき、当然その近傍への類似度は上がる——所見が見えやすく
+  なったのではなく**同語反復的なアーティファクト**。1件のトレース
+  (Liver - Amyloid、macenko空間)で確認すると、alphaにつれ類似度は
+  0.49→0.73と滑らかに単調増加する一方、top5スライド集合はalpha=0との
+  jaccardが1.0→0.25まで別物に入れ替わっていた——experiments/0039の
+  「alpha=1.0のギャラリー急増は正解ではなく別のスライドに自信を持って
+  飛びついていただけ」という教訓と同型の失敗モードが、GTの無い所見の
+  数値スクリーニングでも再現した。
+- **結論**: 類似度の大きさだけでは局所補正の良し悪しを判断できない。
+  GT実測(0045・0054・0055)がまさにこの罠を避けるため「found/best_rank」
+  という外部の正解基準を使っていたことの裏付けになった。数値による
+  自動選別は断念し、experiments/0046の方針(粗い格子で全所見を網羅し
+  実際に目視する)に戻すことにした。
+
+### experiments/0057(フェーズB): GTの無い18所見を3空間×alpha2点で実ギャラリー生成・全数目視(job 10956)
+
+GTの無い18所見(25所見からCATEGORIES対応7所見を除いたもの)について、
+3空間(plain/whiten/macenko)×alpha(0.0/0.3)=108アームで実際のギャラリー
+画像(生WSIクロップ+matplotlib描画)を生成し、全173枚のギャラリー画像+
+各所見のatlas元画像を**全数目視**した(3グループに分けて並行レビュー)。
+
+| 所見 | 結果 |
+|---|---|
+| Liver - Fatty Change | ✅ 全空間で成功(既知の「機能する所見」と整合) |
+| Liver - Tension Lipidosis | △ plainが最良、macenkoはやや劣る |
+| Liver - Cholangiofibrosis | △ plain・whitenが同着で優勢、macenkoは劣る |
+| Liver - Angiectasis | △ plainにわずかな部分一致の兆し(確信度低い) |
+| Liver - Intrahepatocellular Erythrocytes | △ macenkoにわずかな部分一致の兆し(確信度低い) |
+| 残り13所見(Amyloid・Atrophy・Focus・Hepatodiaphragmatic Nodule・Inflammation・Pigment・Bile Duct Cyst/Hyperplasia・Hepatocyte Apoptosis/Karyomegaly・Hepatocyte Hyperplasia Nodular・Oval Cell Hyperplasia・Stellate Cell Hyperplasia) | ❌ 空間・alphaによらず全滅 |
+
+- **18所見中13所見(72%)が、空間・alphaを変えても一般的な肝細胞組織にしか
+  ヒットしなかった**。原因は空間選択や補正の強さではなく、所見自体が
+  (a) パッチより小さいスケール(単一細胞のアポトーシス小体、個々の肥大核)、
+  (b) パッチより大きいスケール(結節性過形成、肝葉表面の結節、門脈域の
+  胆管増生)、(c) 周囲組織との相対比較を要する基準(萎縮、核腫大)の
+  いずれかで、224pxパッチ単体の埋め込み検索では原理的に捉えられない
+  構造だったこと(README「所見の3クラス分け」と同型の限界)。
+- **数少ない判断材料が得られた所見でも、現行既定(plain)がmacenkoより
+  良いか同等だった**(Tension Lipidosis・Cholangiofibrosis)——空間を
+  変えて改善するケースは目視では確認できなかった。
+- alpha=0.0→0.3程度の穏やかな補正では、多くのアームで上位ヒットスライド
+  自体がほとんど変わらず(plainでは複数の所見でalpha無関係に同一スライド
+  ・同一パッチ集合を返した)、目視で分かるような劇的な変化はまれだった。
+
+**一連の検証(0055〜0057)の総括**: 空間選択とalpha補正は本来同時に探索
+すべき変数だった、というユーザー指摘はGT対応7所見で2件の具体的な逆転
+(Deposit, glycogen / Proliferation, Kupffer cell)として裏付けられた。
+一方GTの無い18所見については、空間・補正をいくら変えても大半(13/18)は
+パッチ粒度自体の限界で所見が見えず、補正の出番自体がほとんど無かった。
+数値のみでの自動スクリーニングは局所補正の同語反復的な性質により機能せず、
+今後この種の検証をする際は必ず目視(または found/best_rank のような
+外部の正解基準)を経由する必要がある。
+
+## experiments/0058: glycogen/ground glassに続く3例目探索 — Microgranuloma・Cellular infiltration・Swellingはランダム対照で不成立(2026-09-18、jobs 10988/10991)
+
+track B(成果物所見の追加)として、`self_retrieval_diagnostic.csv` で
+「バッチ交絡なし(batch_dominates_finding_rate=0.0)・コーパス内GTスライドが
+少ない(16/7/7枚、glycogenの6枚と同水準にスパース)」という基準で選んだ
+Microgranuloma・Cellular infiltration・Swellingの3所見を、0019のdeliver
+パイプラインで初めて構築した(job 10988、`experiments/0058`)。
+
+当初 track B 候補に挙げた Tension Lipidosis・Cholangiofibrosis は
+コーパスGTスライドが0枚(Fatty Changeと同型)で検証不能と判明し、この
+3所見に差し替えた経緯がある。
+
+deliver結果:
+
+| 所見 | 最終枚数/スライド数 | 候補プール |
+|---|---|---|
+| Microgranuloma | 150枚/62スライド(target達成) | 5000→547候補 |
+| Cellular infiltration | 80枚/18スライド(候補枯れ) | 5000→237候補 |
+| Swelling | 24枚/7スライド(候補が大きく枯渇) | 5000→24候補 |
+
+`scripts/random_patch_baseline.py`(job 10991)でランダム対照を作り、
+glycogen/ground glassと同じ手順(Claude・非専門家によるブラインド判定→
+`blind_key.csv`で答え合わせ)で検証したところ、3所見とも不成立だった:
+
+| 所見 | 判定精度 | ベースライン(多数派選択) | 判定 |
+|---|---|---|---|
+| Microgranuloma | 49/100 = 49.0% | 61.0% | **不成立**(ベースライン以下) |
+| Cellular infiltration | 80/160 = 50.0% | 50.0% | **不成立**(完全に偶然) |
+| Swelling | 26/48 = 54.2% | 50.0% | **不成立**(誤差範囲) |
+
+参考: glycogen・ground glassは同一手法で91%(ベースライン50%)と明確に
+分離できていた。今回の3所見はいずれもその水準に遠く及ばず、hypertrophy
+(59%、ベースライン61%)と同型の不成立パターンだった。
+
+**教訓**: `self_retrieval_diagnostic`の「バッチ交絡なし・実信号あり」は、
+コーパス内でのslide-levelクラスタリングを測る指標であり、deliverモードが
+出す**patch-levelの集合が非専門家に視覚的に選別可能か**とは別の基準
+である。前者を満たしても後者を満たすとは限らない——今回の3所見がその
+実例。「GTスライドがスパースであること」はglycogen/ground glassの
+必要条件だったが、十分条件ではなかった。
+
+留保: 判定者は病理の専門家ではない(この点はglycogenの91%が
+positive controlとして機能した実績が前提)。専門家なら見分けられる所見が
+ここに含まれる可能性はゼロではないが、hypertrophyの前例に倣い、この
+非専門家判定の否定結果をもって3所見とも一旦棚上げとする。
+
+→ glycogen・ground glassに続く3例目は依然見つかっていない。次の一手は
+track A(既存2所見の成果物としての完成度を上げる)に集中する。
+
+## GTソースの根本的な過小カウントが判明(2026-09-18) — 全GT依存実験の再検証チェックリスト
+
+0058の直後、「コーパス内の非seedスライドにも本当は何らかの所見記録があるのでは」
+というユーザー指摘をきっかけに、研究室NASのOpen TG-GATEs生データ
+(`data/tggate_csv/corrected/open_tggates_pathology.csv` +
+`open_tggates_pathological_image.csv`)を初めてこのプロジェクトに導入した。
+
+**発覚した問題**: このプロジェクトが唯一のGTソースとして使ってきた
+`data/processed_csv/single_finding_liver.csv`は、「その個体に所見が
+1種類しか記録されていない」場合だけを拾うフィルタ済みテーブルで、
+**併発所見を持つ個体を丸ごと除外**していた。生データから単一所見フィルタを
+外した完全版`data/processed_csv/full_finding_liver.csv`(2026-09-18生成、
+`data/`配下なのでgit管理外・既存single_finding_liver.csvの2476件を完全再現
+することを検証済み)と比較すると、所見によってはコーパスGTスライド数が
+**最大5〜6倍**取りこぼされていた(Cellular infiltration 7→25枚、Single cell
+necrosis 4→23枚、Vacuolization cytoplasmic 2→13枚、Hypertrophy 25→53枚等。
+詳細は上記「experiments/0058」の表)。**Fatty Change(Degeneration, fatty)は
+「コーパスGT 0枚」としていたが実際は3枚存在**しており、「現行コーパスでは
+実行不可能」という結論(README各所)も誤りだった。
+
+`self_retrieval_diagnostic.py`・`validate_against_ground_truth.py`は両方とも
+このGTソース1本に依存しており(`--gt-csv`オプションを追加、既定は変更なし、
+commit参照)、2026-09-18にjobs 10995/10996で完全版GTによる再実行を行った結果:
+
+- **Cellular infiltration・Microgranulomaで新たにバッチ交絡が検出された**
+  (batch_dominates_finding_rate 0.0/測定不能 → 0.5/1.0)。旧データではバッチ
+  対照クエリが0〜1件しか作れず「交絡なし」に見えていただけだった。今回の
+  ランダム対照不成立(判定精度50%/49%)と独立に一致する結果。
+- **Swellingは完全データでも自己検索の数値が不変**(順位8.0・バッチ支配0.0の
+  まま)。deliverの失敗はGT7枚(実際は9枚使えた)による候補プールの薄さが
+  原因の可能性があり、再挑戦の価値がある。
+- **finding_routing.py(所見ごとのmacenko/whiten採用表)の一部が、極端に薄い
+  GTサンプルに基づく判断だった**: Hypertrophyはbaseline best 30→**1**
+  ・macenko 19→2で逆転、Inclusion body, intracytoplasmicはGTがわずか**1枚**
+  から6枚になりbaseline best 475→50・macenko 97→80で逆転。Increased mitosis
+  のmacenko優位(best=1、旧新で完全に不変)だけが頑健に確認された。
+
+### 全GT依存実験の一覧(コード上の参照を機械的に洗い出し、時系列順)
+
+`grep`で`single_finding_liver` / `GT_CSV` / `validate_against_ground_truth` /
+`self_retrieval_diagnostic` / `gt_validation`への参照を全実験ディレクトリから
+検出した(担当スクリプトが実際にGTテーブルを読む箇所のみ、コメントでの
+言及のみのものは除外して判断)。**上流の決定(倍率補正・whiten採用・
+finding_routing表)ほど下流の実験全体の前提になっているため、ユーザー提案
+どおり時系列(古い方)から潰していくのが合理的** — 上流が変われば下流の
+再実行要否自体が変わりうる。
+
+| 順 | 実験 | 内容 | GT依存の種類 | 優先度の理由 |
+|---|---|---|---|---|
+| 1 | 0014 | アトラスseed版deliver(否定的、ドメインギャップ発見) | single_finding直接(seed/exclude) | **見送り**: glycogen GTは6→6で不変(experiments/0024〜0026再検証で確認済みのGT数と一致)。再検証の実利は低いため未実施のまま据え置き |
+| 2 | 0015 | コーパスseed版deliver(glycogen成立) | single_finding直接 | **見送り**: 同上(0058で既に部分再検証済み) |
+| 3 | 0016 | クエリ埋め込み経路の交絡切り分け | self_retrieval+single_finding | **見送り**: 結論は経路自体の話でGT量に非依存(低優先度のため未実施) |
+| 4 | 0019 | 背景除去後のdeliver再実行 | single_finding直接 | **見送り**: glycogen/ground glassは0058で確認済み。granular eosinophilicのみ未確認だが成果物トラック外のため未実施のまま据え置き |
+| 5 | ~~0022~~・**0023** | 倍率補正の検証・決着 | ~~0022は誤検出(所見ラベル不使用の合成自己参照テスト)~~ / 0023はsingle_finding+GT直接 | **完了(2026-09-18、experiments/0059)**: 結論は変化なし、むしろ補強された。下記参照 |
+| 6 | 0024・0025・0026 | 異方性除去(whiten)の構築・alphaスイープ | self_retrieval+GT両方 | **完了(2026-09-18、jobs 11004/11005)**: Kupffer cellのwhitenルーティングが薄いGTによる誤りと判明。下記参照 |
+| 7 | 0027 | atlas GT悪化の図版単位診断 | GT直接 | **完了(2026-09-18、experiments/0060)**: 0024〜0026の結論と整合。下記参照 |
+| 8 | 0028 | finding_routing.py本体の実装+検証(既存CSVの再集計) | GT直接(決定的) | **完了(2026-09-18、experiments/0061)**: Kupffer cell修正を反映して再集計。Inclusion bodyのwhiten vs macenko 3択比較が新たな残課題として判明 |
+| 9 | 0029・0030 | ルーティング適用のデモ・目視診断 | GT参照 | **完了(2026-09-18)**: 既存データの3択比較で対象所見の妥当性を再確認。下記参照 |
+| 10 | 0031 | Fatty Changeのmacenko vs plain目視診断 | GT言及(旧GT0枚で定量評価不可だった) | **完了(2026-09-18)**: CATEGORIES追加により初の定量評価。macenkoルーティングが誤りと判明・修正。下記参照 |
+| 11 | 0034 | macenkoルーティング先4所見の目視診断 | GT参照 | **完了(2026-09-18)**: Inclusion bodyのmacenkoルーティングが誤りと判明・修正。下記参照 |
+| 12 | 0035・0036・0037 | OvR分類器によるタイル事前重み付け | self_retrieval+single_finding+GT | **完了(2026-09-18、experiments/0062)**: Kupffer cell chance水準・Inclusion body高安定と判明。下記参照 |
+| 13 | 0038 | atlas vs corpusドメインギャップの定量化 | single_finding+GT | **見送り(2026-09-18、ユーザー合意)**: domain_shift系の結論は0054・0055再検証(experiments/0064・0065)でカバー済み |
+| 14 | 0039・0040 | ドメインギャップ線形補正の構築・alphaスイープ | single_finding+GT | **見送り(同上)**: 0045が後継で、0045のalpha選定結果自体は0054・0055の再検証で間接的に裏取りされた |
+| 15 | 0041・0042 | macenko+線形補正の全所見目視検証 | single_finding+GT | **見送り(同上)**: 目視検証のみでGT数値に依存する主張は含まれない |
+| 16 | 0045 | finding routed domain correction GTスイープ | GT直接 | **見送り(同上)**: 0045のalpha選定結果は後継の0054・0055(experiments/0064・0065で完全GT再検証済み)に事実上置き換えられた |
+| 17 | 0046・0047・0048 | 同上の目視スイープ・文脈対照・候補プール分析 | single_finding | **見送り(同上)**: 目視検証中心で、候補プール分析の結論もGT量に非依存 |
+| 18 | **0051** | **macenkoスライド単位fit vs パッチ単位fitのGT評価(現行corpus選定の決め手)** | GT直接(決定的) | **最高**: 現行macenkoコーパスそのものの採否判断。**完了(2026-09-18、experiments/0063、job 11039)**: 結論不変(REGRESSED、slidefit不採用)。下記参照 |
+| 19 | 0054 | JPEG-shift補正のGT対応7所見alphaスイープ | GT直接 | 高: 直近の補正方針の根拠。**完了(2026-09-18、experiments/0064、job 11040)**: 3所見で補正不要と判明。下記参照 |
+| 20 | **0055** | 局所k近傍補正のGT対応7所見alphaスイープ(2件の空間逆転を発見) | GT直接 | **高**: 現在採用中の空間選択の最新根拠。**完了(2026-09-18、experiments/0065、job 11041)**: 同様に3所見で補正不要と判明。下記参照 |
+| 21 | 0057 | GTの無い18所見の目視スイープ | GT参照(baseline文脈のみ) | **見送り**: 結論(13/18が原理的に不可)はGT量に非依存とみられる |
+| 22 | 0058 | 3所見の追加deliver + ランダム対照 | 直接(本項の起点) | 完了。Swellingのみ9枚seedでの再deliverが残タスク(成果物トラック側の別課題として継続) |
+
+**チェックリスト状況(2026-09-18時点)**: GT直接依存かつ上流の意思決定に
+関わる項目(5〜12、18〜20)はすべて完全版GTで再実行完了。1〜4・13〜17・21は
+「見送り」——GT量に依存しない結論、または後継実験による再検証済みのため
+実利が低いと判断し、ユーザー合意のもと未実施のまま据え置いている。22
+(0058)はSwellingの9枚seed再deliverのみ残タスクとして成果物トラック側で
+継続する。
+
+### experiments/0059: 0023(倍率補正の決着)を完全版GTで再実行(2026-09-18、job 11001)
+
+チェックリストの最初の項目。`experiments/0023`から`gt_csv`のみ
+`full_finding_liver.csv`に差し替えたA/B(他パラメータは完全に同一)。
+
+| カテゴリ | baseline best(旧→新) | 最良autoscaleアーム best(旧→新) | 旧の勝者 | 新の勝者 |
+|---|---|---|---|---|
+| Hypertrophy | 30→1 | 23→7 | autoscale | **baseline(逆転)** |
+| Single cell necrosis | 14→1 | 13→4 | autoscale(僅差) | **baseline(逆転)** |
+| Increased mitosis | 10→10(不変) | 9→3 | autoscale | autoscale(維持・差が拡大) |
+| Deposit, glycogen | 7→7(不変) | 101→101(不変) | baseline | baseline(不変、correction適用で破綻したまま) |
+| Hematopoiesis, extramedullary | 28→1 | 25→1 | autoscale(僅差) | 引き分け |
+| Proliferation, Kupffer cell | 78→13 | 33→33(不変) | autoscale | **baseline(逆転)** |
+| Inclusion body, intracytoplasmic | 475→50(旧GTはわずか1枚) | 測定不能→35 | (測定不能) | autoscale(僅差) |
+
+**結論: 「倍率補正はコアパイプラインに入れない」という実務上の決定は変化なし、
+むしろ補強された。** 7カテゴリ中5カテゴリでbaselineが逆転または同点になり、
+autoscaleが依然勝っているのはIncreased mitosis(差はむしろ拡大)とInclusion
+body(僅差、旧GTはわずか1枚での測定だった)のみ。glycogenは相変わらず
+correction適用で完全に破綻(best 7→101)。
+
+留保: 各カテゴリのbest_rankが軒並み1に近づいているのは、GT数が増えたことで
+「上位候補がたまたまGTに当たる」基準率が上がった効果を含む可能性がある
+(experiments/0058のfinding_routing比較で見たのと同じ注意点)。baseline同士・
+autoscale同士の相対比較としては有効だが、絶対値の改善を額面通りに
+「検索精度が上がった」と読むのは避けること。
+
+### experiments/0024〜0026: whiten採用判断を完全版GTで再検証(2026-09-18、jobs 11004/11005)
+
+チェックリストの2件目。0025(full ZCA whiten・abtt4)と0026(shrinkage whiten
+α=0.25/0.5/0.75)は既に18Mパッチのフル索引を構築済みなので、**索引の
+再構築はせず**評価ステージ(self_retrieval_diagnostic.py /
+validate_against_ground_truth.py)だけを完全版GTで回した
+(`adhoc_*.sh`に複数variant直列ループ対応を追加、commit参照)。
+
+**アトラスGT側(job 11005、実運用のクエリ形式に近い軸)**:
+
+| 所見 | baseline best(旧→新) | whiten best(旧→新) | 旧の勝者 | 新の勝者 |
+|---|---|---|---|---|
+| Hypertrophy | 30→1 | 21→21(不変) | whiten | **baseline** |
+| Single cell necrosis | 14→1 | 45→3 | baseline(既定通り) | baseline(維持) |
+| Increased mitosis | 10→10(不変) | 16→16(不変) | (macenko採用、whiten対象外) | 不変 |
+| Deposit, glycogen | 7→7(不変) | 15→15(不変) | baseline(既定通り) | baseline(維持) |
+| Hematopoiesis, extramedullary | 28→1 | 109→4 | baseline(既定通り) | baseline(維持) |
+| **Proliferation, Kupffer cell** | 78→**13** | 72→**72(不変)** | **whiten(僅差72<78)** | **baseline(13<<72、大逆転)** |
+| Inclusion body, intracytoplasmic | 475→50(旧GT1枚) | 368→**10** | whiten | whiten(さらに明確化) |
+
+**自己検索診断側(job 11004、コーパス内クエリ)**: whitenは`nhr_best_rank_med_noexp`を
+多くの所見で改善した(Hypertrophy 16.5→7.5-9、Single cell necrosis 26→13-15.5、
+Increased mitosis 83→44.5-55、glycogen 21→11.5-12、Kupffer cell 514→413(whitenのみ改善、
+abtt4は534に悪化))。
+
+**この2つの軸の食い違いは想定内**: experiments/0025/0027で既に「whitenはコーパス内検索を
+改善するが、ドメインギャップを跨ぐアトラスクエリでは所見によって悪化する」と分かっており、
+今回の完全GTでの再測定はこのパターンを裏付けただけ。finding_routing.pyのルーティングは
+**実運用のアトラス的クエリを想定した判断**なので、自己検索ではなくアトラスGT側を優先すべき。
+
+**結論: `finding_routing.py`の`WHITEN_FINDINGS`にある唯一の現役エントリ
+`Proliferation, Kupffer cell`は、旧GT(わずか2枚)による僅差(72 vs 78)の判断
+だった。** 完全GT(5枚)ではbaselineが13、whitenは72のまま変わらず、baselineが
+圧倒的に優れる。Hypertrophy・Inclusion body(experiments/0059/job 10996)に続く
+3件目の「薄いGTサンプルに基づくルーティング誤り」。`WHITEN_FINDINGS`から
+`Proliferation, Kupffer cell`を外し baseline に戻すべきと判断する
+(`Necrosis`エントリは元々どの呼び出し元からも到達しない予約枠なので実害なし)。
+
+### experiments/0060・0061: 0027(図版単位診断)・0028(ルーティング再集計)を完全版GTで再実行(2026-09-18、jobs 11024/11026)
+
+チェックリストの3・4件目。0027(`scripts/atlas_per_image_diagnostic.py`に
+`--gt-csv`を追加)・0028(既存CSVの再集計のみ、新規計算なし)を、それぞれ完全版
+GTの入力に差し替えて再実行した。
+
+- **図版単位の結果(0060)は0024〜0026の所見単位の結論と完全に整合**: Kupffer
+  cellは唯一の図版でdelta_best=+59(baseline 13 → whiten 72、上記の逆転と一致)。
+  Hypertrophyは7図版中5枚でwhitenが悪化(delta最大+29)。悪化した図版は
+  39枚中20枚、上位4枚(悪化した図版の20%)が悪化幅合計の69%を占め、
+  「外れ値ではなく所見全体に広く効いている」という0027の結論に比べると
+  やや外れ値寄りの集中度に見える(0027は7カテゴリのみ・今回は35所見に拡大
+  しているため単純比較はできない)。
+- **0061はKupffer cellの修正後の`WHITEN_FINDINGS`(`Necrosis`のみ)を使って
+  再集計したため、自己検索・アトラスGTの両表でKupffer cellは正しく
+  baselineのまま**(routed=514/13、whitenの413/72より安全側)であることを確認。
+- **新たな警告(0061が自動検出)**: `Inclusion body, intracytoplasmic`について、
+  baseline/whitenの2択で見ると**whiten(図版単位中央値16.5)がbaseline(47.5)
+  より明確に優れている**。ただしこの所見は現在macenkoにルーティングされており
+  (この検証はbaseline/whitenの2択しか比較しないため見えない)、baseline対
+  macenkoの比較(experiments/0059、job 10996)ではbaseline=50・macenko=80で
+  baselineが勝っていた。**baseline・macenko・whitenを同一条件(所見単位クエリ、
+  図版単位)で3択直接比較できておらず、現状のmacenko採用が本当に最良かは
+  未確認**。次の一手として3択比較を検討する必要がある。
+
+### experiments/0029〜0031・0034の再検証: 3択(baseline/whiten/macenko)を完全版GTで直接比較(2026-09-18)
+
+チェックリストの5・9〜11件目。新規ジョブは不要だった —
+job 10996(baseline/macenko、完全GT、experiments/0059の副産物)と
+job 11005(whiten、完全GT、experiments/0024〜0026再検証)が同一の
+`CATEGORIES`・同一GTソースを使っていたため、既存の出力を組み合わせるだけで
+GT対応7カテゴリ全てについて3択の直接比較ができた:
+
+| finding | baseline | macenko | whiten | 最良 | 現状のルーティング |
+|---|---|---|---|---|---|
+| Hypertrophy | **1** | 2 | 21 | baseline(僅差) | macenko(据え置き、下記理由) |
+| Single cell necrosis | **1** | 2 | 3 | baseline | baseline(正しい) |
+| Increased mitosis | 10 | **1** | 16 | macenko | macenko(正しい、頑健) |
+| Deposit, glycogen | **7** | 14 | 15 | baseline | baseline(正しい) |
+| Hematopoiesis, extramedullary | **1** | 42 | 4 | baseline | baseline(正しい) |
+| Proliferation, Kupffer cell | **13** | 395 | 72 | baseline | baseline(0024〜0026で修正済み) |
+| Inclusion body, intracytoplasmic | 50 | 80 | **10** | **whiten** | **macenko→whitenに修正** |
+
+**`Inclusion body, intracytoplasmic`は3択中最悪のmacenko(80)にルーティングされていた。**
+旧GT(コーパス1枚)では「macenkoがwhitenよりGT改善幅が大きい」という判断
+だったが、完全版GT(6枚)ではwhiten(10)が圧倒的に最良、macenko(80)は
+baseline(50)よりさらに悪い。`lib/finding_routing.py`の`MACENKO_FINDINGS`から
+外し`WHITEN_FINDINGS`に移した。experiments/0034で「Inclusion bodyのmacenko
+ルーティング後の見え方がwhitenルーティング時(0030)より弱い」と指摘されていた
+違和感が、これで裏付けられた形になる。
+
+**Hypertrophyはbaseline(1)がmacenko(2)よりわずかに優れるが、ルーティングは
+変更しない**: 差が僅少(GT数増加による基準率上昇の影響が大きいと見られる、
+上記「experiments/0059」の留保参照)で、かつこの所見自体がランダム対照で
+不成立(README「所見の3クラス分け」)と確定済みのため実害が無い。
+
+### Fatty Change(Degeneration, fatty)の初めての定量評価(2026-09-18)
+
+Fatty Changeは完全版GTでコーパスに3枚のGTスライドが見つかった(上記「GTソースの
+根本的な過小カウントが判明」)ため、`CATEGORIES`(`scripts/validate_against_ground_truth.py`)
+に追加し(ユーザー確認済み、8カテゴリ化。0038〜0057等の過去実験が前提にしていた
+「7カテゴリちょうど」への影響は将来の再現実行時に個別対応)、初めて定量的な
+3択比較を実行した。experiments/0031/0034ではmacenko側が目視で視覚的に妥当な
+一致を示していたが、定量結果は逆だった:
+
+| 所見 | baseline | macenko | whiten | 最良 |
+|---|---|---|---|---|
+| Degeneration, fatty | 17 | 28 | **3** | **whiten** |
+
+**whitenが3択中最良、現行のmacenkoルーティング(28)はbaselineより悪い最下位。**
+目視診断(0031/0034)でmacenko側の脂肪空胞テクスチャが視覚的に妥当に見えたのは
+事実だが、実際にGTスライドをランキングで引き当てる精度では逆にwhitenが優れて
+いたことになる——「見た目のもっともらしさ」と「検索精度」が一致しない所見が
+ここでも見つかった(Kupffer cell・Inclusion bodyに続く3件目)。
+`WHITEN_FINDINGS`に移した。
+
+これで完全版GT再検証によるルーティング表の修正は4件(Kupffer cell:
+whiten→baseline、Inclusion body・Fatty Change: macenko→whiten、Hypertrophy:
+差僅少で維持)。`MACENKO_FINDINGS`に残るのはHypertrophy・Increased mitosisの
+2所見のみとなった。
+
+### experiments/0035〜0037の再検証: OvR分類器を完全版GTで再実行(2026-09-18、job 11031)
+
+チェックリストの12件目。`lib/ovr_scoring.py`は既に`config["gt_csv"]`経由でGT
+ソースを受け取る設計だったためコード変更不要——0036(CATEGORIES 7所見版、
+Hypertrophy単体の0035を包含)の`gt_csv`だけをfull_finding_liver.csvに
+差し替えて再実行した。0037(atlas画像を正例にするLOIO手法)は「ドメイン
+ギャップでAUROCが飽和し所見の難易度を反映しない」という結論がGTの完全性と
+無関係な指標そのものの限界のため再実行していない。
+
+| 所見 | 旧LOSO AUROC(fold数) | 新LOSO AUROC(fold数) |
+|---|---|---|
+| Hypertrophy | 0.660(0.10〜0.92、14fold) | 0.801(0.29〜0.97、**31fold**) |
+| Single cell necrosis | 0.842(3fold) | 0.939(**11fold**) |
+| Increased mitosis | 0.789(7fold) | 0.849(**14fold**) |
+| Deposit, glycogen | 0.960(4fold) | 0.960(4fold、不変) |
+| Hematopoiesis, extramedullary | 0.912(3fold) | 0.927(**5fold**) |
+| Proliferation, Kupffer cell | **LOSO不可(study1つ)** | **0.493(chance水準、2fold)** |
+| Inclusion body, intracytoplasmic | **LOSO不可(study1つ)** | **0.916(0.74〜0.97、4fold)** |
+
+**最大の発見: Kupffer cell と Inclusion body は、旧GTではstudy数が1つしかなく
+LOSO検証自体が不可能だったが、完全版GTで初めて検証できるようになった。**
+
+- **Proliferation, Kupffer cell: AUROC 0.493(完全な偶然水準)。** 分類器は
+  所見を全く学習できていない。これは自己検索診断のバッチ交絡
+  (`batch_dominates_finding_rate=1.0`、experiments/0024〜0026再検証)、
+  アトラスGTでのbaseline圧勝(13 vs whiten 72、同上)に続く、**3つ目の独立した
+  手法による「Kupffer cellは実質学習不能」の裏付け**。この所見はどの角度から見ても
+  一貫して機能しないと言える。
+- **Inclusion body, intracytoplasmic: AUROC 0.916(0.74〜0.97)と高く安定。**
+  4fold全てで0.74以上を維持しており、Hypertrophy(min 0.29)のような極端な
+  ブレが無い。whitenルーティングへの修正(best_rank 10、experiments/0029〜
+  0031・0034再検証)と合わせ、**この所見が実は真に有望である可能性を示す
+  初めてのポジティブな新情報**。glycogen・ground glassに続く3例目の成果物候補
+  として検討する価値がある(ただしatlas図版はわずか2枚、コーパスGTも6枚と
+  少ないままなので、成果物化にはランダム対照等の別検証が引き続き必要)。
+- **他の所見(Hypertrophy・Single cell necrosis・Increased mitosis・
+  Hematopoiesis)はfold数が2〜4倍に増えてAUROCの推定がより頑健になったが、
+  方向性(良い/悪い)自体は変わらなかった**。Hematopoiesisは相変わらずAUROCが
+  高いのにギャラリーは0→0のまま(「タイル識別の改善はスライド集計に伝播しない」
+  という0036の発見の再確認)。Hypertrophyはmin AUROCが依然低く(0.29)、
+  fold間の不安定性という既知の限界は残る。
+
+### experiments/0051の再検証: macenkoスライド単位fit vs パッチ単位fitを完全版GTで再評価(2026-09-18、experiments/0063)
+
+チェックリスト項目18。`experiments/0051`から`gt_csv`のみ
+`full_finding_liver.csv`に差し替えたA/B(index/features・pipelinesなど他は
+完全に同一)。0051は現行macenkoコーパス(experiments/0033、パッチ単位fit)を
+新規のスライド単位fit索引(experiments/0050)に切り替えるべきかを決めた実験で、
+0054・0055などmacenko空間を前提とする後続実験より上流にあるため、これらより
+先に再検証する。完全版GTでは`validate_against_ground_truth.CATEGORIES`が
+Fatty Change追加で7→8所見になっているため、`gt_comparison.csv`は8行/8所見を
+期待する(0051オリジナルは7所見のみで判定していた点に注意。Fatty Changeは
+現行ルーティングがwhitenであり本来macenko比較の対象外だが、CATEGORIES経由で
+自動的に8所見全部が評価されるため、Fatty Change行の扱いは判定時に除外するか
+確認が必要)。
+
+実行: `runx 63`(GPU 1、`small-creator-i`、既存索引を再利用するため軽量・
+1h想定)。
+
+**結果(2026-09-18、job 11039)**: **総合判定は旧GTと同じ`REGRESSED`
+(slidefitへの切替は非推奨)——完全版GTでも結論は変わらず、むしろ結論の
+頑健性が補強された**。
+
+| 所見 | 旧GT(n_gt) | 旧: patchfit best→slidefit best | 完全GT(n_gt) | 完全GT: patchfit best→slidefit best | 判定(両GT共通) |
+|---|---|---|---|---|---|
+| Hypertrophy | 25 | 18→35(悪化) | 53 | 2→2(**同点、旧の「悪化」から不変に変化**) | worsened→unchanged |
+| Single cell necrosis | 4 | 85→69(改善) | 23 | 2→1(改善) | improved |
+| Increased mitosis | 10 | found 10→9(**regressed**) | 20 | found 19→17(**regressed**) | regressed |
+| Deposit, glycogen | 6 | 14→22(悪化) | 6(不変) | 14→22(悪化、同一値) | worsened |
+| Hematopoiesis, extramedullary | 3 | 83→51(改善) | 5 | 38→51(悪化に反転) | improved→worsened |
+| Proliferation, Kupffer cell | 2 | found 1→0(**regressed、slidefitで完全消失**) | 5 | found 4→3(**regressed、緩和はしたが依然消失あり**) | regressed |
+| Inclusion body, intracytoplasmic | 1 | 52→15(改善) | 6 | 52→15(改善、同一値) | improved |
+| Degeneration, fatty | (CATEGORIES未追加のため旧実験では未評価) | — | 3 | 26→20(改善) | improved(新規) |
+
+- **regressed(found減少)の所見はIncreased mitosisとKupffer cellで旧GT・完全GT
+  共に一致**——これが最終判定を`REGRESSED`に固定する決め手であり、GT量の
+  増加に左右されない頑健な結論。Kupffer cellはfound減少の程度が1/2→0から
+  4/5→3に緩和されたが、依然としてslidefitでGTスライドが1枚候補プールから
+  消えており、regressed判定自体は変わらない。
+- Hypertrophyは旧GT(25枚)では「best_rank 18→35で明確に悪化」だったが、
+  完全GT(53枚)では「2→2で完全に同点」に変化した——**サンプル数が少ない
+  旧GTでは偶然の順位変動を「悪化」と誤認していた可能性を示す一例**。ただし
+  最終判定には影響しない(regressed所見が別に2つあるため)。
+- Hematopoiesisはimproved→worsenedに反転したが、best_rank自体は38→51と
+  38→51(改善)/83→51(改善)のいずれでも大差ない範囲であり、GT枚数3→5の
+  変化に伴う軽微な順位変動とみられる。
+- **結論**: 現行本番のMacenko索引(experiments/0033、パッチ単位fit、
+  `lib.finding_routing.MACENKO_INDEX_DIR`)を変更する必要はない。slidefit
+  (experiments/0050)への切替は完全版GTでも不採用が正しい判断と確認できた。
+  `lib/finding_routing.py`の変更は不要。
+
+### experiments/0054・0055の再検証: ドメインギャップ補正alphaスイープを完全版GTで再実行(2026-09-18、experiments/0064・0065、jobs 11040/11041)
+
+チェックリスト項目19・20。それぞれ`gt_csv`のみ`full_finding_liver.csv`に
+差し替えたA/B(families・対象所見リストは変更せず、0054・0055オリジナルと
+完全に同一のまま)。**両実験ともnullかつ非常に一貫した新知見が得られた**:
+旧GT(GT枚数が少なかった所見)で「補正すると順位が大きく改善する」と
+出ていた所見のうち3つ(Single cell necrosis・Hematopoiesis, extramedullary・
+Hypertrophy)が、完全版GTでは**補正なしで既にbest_rank 1〜2まで到達しており、
+補正の必要が消滅した**(best_alpha=0.0に反転)。
+
+| 所見 | 旧GT(n_gt) base_best | 完全GT(n_gt) base_best | 0054 residual best_alpha(旧→新) | 0055 local best_alpha(旧→新) |
+|---|---|---|---|---|
+| Single cell necrosis | 4件, 14位 | 23件, **1位** | 0.5→**0.0** | 1.0→**0.0** |
+| Hematopoiesis, extramedullary | 3件, 28位 | 5件, **1位** | 0.25→**0.0** | 1.0→**0.0** |
+| Hypertrophy | 25件, 18位 | 53件, **2位** | (0054は元々macenko系でjpeg_shift/residualとも0.0のまま不変) | 0.2→**0.0** |
+| Deposit, glycogen | 6件, 7位(不変) | 6件, 7位(不変) | 0.5→0.5(不変) | 0.0→0.0(不変) |
+| Proliferation, Kupffer cell | 2件, 72位 | 5件, 72位(不変) | 1.0→1.0(残差)/0.1→0.1(jpeg)不変 | 0.5→0.5(不変) |
+| Increased mitosis | 10件, 1位(不変) | 19件, 1位(不変) | 0.0→0.0(不変) | 0.0→0.0(不変) |
+| Inclusion body, intracytoplasmic | 1件, 52位(不変) | 6件, 52位(不変) | 0.25→0.25(不変) | 0.75→0.75(不変) |
+
+- **解釈**: Single cell necrosis・Hematopoiesis・Hypertrophyの3所見は、旧GTの
+  枚数が極端に少なかった(それぞれ3〜4件、3件、25件)ため、GTスライドの
+  中にたまたま検索順位が悪いものが混じっており、それを補正alphaで「救って
+  いた」ように見えていた。完全版GT(5〜53件)でGT集合が広がると、素の検索
+  (alpha=0)で既にbest_rank 1〜2に到達することが分かり、**補正が必要だった
+  という結論自体が旧GTのサンプルサイズに起因するアーティファクトだった**
+  と判明した。
+- Deposit, glycogen・Kupffer cell・Increased mitosis・Inclusion bodyの
+  4所見は完全GTでもbest_alpha・rank_deltaが完全に不変——これらの所見に
+  ついては0045・0054・0055の補正効果の結論は頑健。
+- **production側への影響はない**: `domain_shift`・`jpeg_shift`・
+  `local_shift`いずれの補正も`lib/finding_routing.py`や本番の検索・deliver
+  パイプラインには組み込まれておらず、各実験の出力ディレクトリ内で完結する
+  探索的検証に留まっていた(`grep -rl "domain_shift\|jpeg_shift\|local_shift"
+  lib/ scripts/`が0件)。そのため今回の結果はコードの再修正ではなく、
+  「これらの補正手法は少なくともSingle cell necrosis・Hematopoiesis・
+  Hypertrophyには不要(むしろ有害、0055ではalpha増加で悪化)」という知見の
+  記録として扱う。
+
 ## 次の一手(成果物トラック)
 
-1. **glycogen deliver の137枚(job 9701)を病理知識のある人にレビューしてもらう** —
+1. **glycogen deliver の137枚を病理知識のある人にレビューしてもらう** —
    採用率・多様性・所見レンジのカバー。GT スライドを全除外して未ラベルスライドだけから
    組んだ集合なので、「本当にグリコーゲン沈着か」がそのまま成果物の妥当性になる。
    ランダム対照で「検索が何かを選別している」ことは確認済み(判定精度91%)なので、
-   残る問いは「選別しているそれがグリコーゲン沈着か」に絞られた
+   残る問いは「選別しているそれがグリコーゲン沈着か」に絞られた。
+   **【2026-09-18】** レビューしやすい形として、背景除去済み(`experiments/0019`)の
+   137枚をスライド別にグルーピングしNNLアトラス参照図版と並べて見られるローカル
+   HTMLギャラリー(`outputs/pathology_review_2026-09-18/glycogen.html`)を作成済み。
+   病理専門家によるレビューは依然未実施(見込みなし、下記参照)
 2. **ground glass deliver の113枚も病理レビューに回す** — 2例目の「機能する所見」
-   (判定精度91%・recall 100%)。glycogen と同じく未ラベルスライドのみから組んだ集合
+   (判定精度91%・recall 100%)。glycogen と同じく未ラベルスライドのみから組んだ集合。
+   **【2026-09-18】** 同様にローカルHTMLギャラリー
+   (`outputs/pathology_review_2026-09-18/ground_glass.html`)を作成済み
+   (NNLアトラスにこの所見専用の掲載図版が無いため参照図版なし)。病理専門家による
+   レビューは依然未実施
 3. ~~**背景パッチをコーパスから落とす**~~ **(2026-09-09 完了、`experiments/0017`→`0018`)** —
    `sat_frac < 0.10` の背景 389,959 枚(2.12%)を manifest から除外し索引を再構築(GPU 不要)。
    `_is_blank_tile` もクエリ側で同基準に統一。max_similarity ランキングの自己検索順位は

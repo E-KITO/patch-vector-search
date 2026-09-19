@@ -1,0 +1,7 @@
+exp_id: 0060
+exp_name: 0060_20260918_atlas_outlier_diagnostic_full_gt
+created_date: 20260918
+git_commit: 9c636dbe660488c18dc19d8ac651cc55d4fdb23b
+resumed_from_exp: 0027_20260911_atlas_outlier_diagnostic
+resume_checkpoint_dir: outputs/0027_20260911_atlas_outlier_diagnostic
+resume_checkpoint_file: null

@@ -1,0 +1,7 @@
+exp_id: 0063
+exp_name: 0063_20260918_macenko_slidefit_vs_patchfit_gt_eval_full_gt
+created_date: 20260918
+git_commit: 13ff304e2f4850a04dd1bdea154d6bb386baf3fc
+resumed_from_exp: 0051_20260916_macenko_slidefit_vs_patchfit_gt_eval
+resume_checkpoint_dir: outputs/0051_20260916_macenko_slidefit_vs_patchfit_gt_eval
+resume_checkpoint_file: null

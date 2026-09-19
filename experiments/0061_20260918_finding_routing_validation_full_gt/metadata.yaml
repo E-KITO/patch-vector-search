@@ -1,0 +1,7 @@
+exp_id: 0061
+exp_name: 0061_20260918_finding_routing_validation_full_gt
+created_date: 20260918
+git_commit: 6ca8c100f54cb9f27a51e11276e56ea609c748d7
+resumed_from_exp: 0028_20260911_finding_routing_validation
+resume_checkpoint_dir: outputs/0028_20260911_finding_routing_validation
+resume_checkpoint_file: null

@@ -16,9 +16,15 @@ experiments/0025-0031 で、次の2種類の変換がそれぞれ所見によっ
 を出し分ける。GT実測の無い所見はすべて保守的に baseline(「悪化しないと確認
 できるまでは使わない」方針)。
 
-Hypertrophy と Inclusion body, intracytoplasmic は whiten・macenko の両方で
-GT改善が確認されたため、GT改善幅がより大きい macenko を採用した(ユーザー確認
-済み、README「experiments/0031」の三択問題)。
+【2026-09-18 修正】上記の判断は単一所見フィルタ済みGT(single_finding_liver.csv、
+併発所見を持つ個体を丸ごと除外)に基づいていたと判明(README「GTソースの根本的な
+過小カウントが判明」参照)。完全版GT(full_finding_liver.csv)でbaseline/whiten/
+macenkoの3択を直接比較し直した結果(README「experiments/0029〜0031・0034の
+再検証」)、Inclusion body, intracytoplasmicとDegeneration, fatty(Fatty Change)
+はmacenkoではなくwhitenが最良と判明、WHITEN_FINDINGSに移した。Proliferation,
+Kupffer cellも同様の理由でwhitenからbaselineに戻した(README「experiments/
+0024〜0026」)。Hypertrophyのみ、僅差でbaselineが優れるが実害が無いため
+macenkoのまま維持している。
 """
 from __future__ import annotations
 
@@ -47,6 +53,20 @@ MACENKO_STAIN_REFERENCE = Path("data/baseline/63958_x38976_y7616.png")
 # 確認された所見。Hypertrophy と Inclusion body はここには含めない(macenko の
 # 方がGT改善幅が大きく、そちらを採用したため — 下記 MACENKO_FINDINGS 参照)。
 #
+# 【2026-09-18 修正】single_finding_liver.csv(併発所見を持つ個体を丸ごと
+# 除外するフィルタ済みGT)がプロジェクト全体の唯一のGTソースだったと判明
+# (README「GTソースの根本的な過小カウントが判明」参照)。"Proliferation,
+# Kupffer cell" は旧GT(コーパスにわずか2枚)でwhitenがbaselineに僅差で
+# 勝っていた(best_rank 72 vs 78)ためWHITEN_FINDINGSに入れていたが、
+# 完全版GT(data/processed_csv/full_finding_liver.csv、コーパス5枚)で
+# 再評価すると baseline=13 対 whiten=72 のまま、と**baselineが圧倒的に
+# 優位**と判明した(experiments/0024〜0026 再検証、jobs 11004/11005)。
+# whitenはコーパス内自己検索(self_retrieval_diagnostic)では改善するが、
+# 実運用に近いアトラスクエリ(validate_against_ground_truth)では悪化する
+# ——0025/0027で確立済みのパターンがここでも再現された。ルーティングは
+# アトラスクエリを想定した判断なので "Proliferation, Kupffer cell" を
+# WHITEN_FINDINGSから外しbaselineに戻した。
+#
 # ⚠️ "Necrosis"(コーパスGT n=13の広いラベル)と "Single cell necrosis"
 # (atlas フォルダ "Liver - Necrosis" が scripts.validate_against_ground_truth.
 # CATEGORIES を通じて実際に解決される先、コーパスGT n=4)は、single_finding_liver.csv
@@ -60,10 +80,20 @@ MACENKO_STAIN_REFERENCE = Path("data/baseline/63958_x38976_y7616.png")
 # SUPPORTED_FINDINGS にも無い)からも到達しない。将来 bare "Necrosis" ラベルを
 # 直接クエリする経路(例: 0019 の SUPPORTED_FINDINGS 拡張)を追加する場合のための
 # 予約——安易に "Single cell necrosis" へキー名を変更しないこと(それは逆に
-# 悪化が確認されている経路を有効化してしまう)。
+# 悪化が確認されている経路を有効化してしまう)。この n=13 の evidence も
+# 単一所見フィルタ済みGTに基づくもので、完全版GTでは未検証。
+#
+# 【2026-09-18 修正】完全版GT(full_finding_liver.csv)で baseline/whiten/macenko
+# の3択を初めて同一条件(validate_against_ground_truth.py、同一CATEGORIES)で
+# 直接比較したところ、"Inclusion body, intracytoplasmic" は旧GT(1枚)による
+# 「macenko改善幅がwhitenより大きい」という判断(下記 MACENKO_FINDINGS の説明
+# 参照)が誤りで、**完全版GT(6枚)ではwhitenが3択中最良**(best_rank:
+# baseline=50, macenko=80, whiten=10)と判明した。MACENKO_FINDINGSから
+# WHITEN_FINDINGSへ移した(experiments/0059〜0061 再検証、jobs 10996/11005)。
 WHITEN_FINDINGS = frozenset({
     "Necrosis",
-    "Proliferation, Kupffer cell",
+    "Inclusion body, intracytoplasmic",
+    "Degeneration, fatty",
 })
 
 # experiments/0031 で Macenko が有利と確認された所見。Hypertrophy / Inclusion
@@ -74,11 +104,24 @@ WHITEN_FINDINGS = frozenset({
 # ので競合なし。Fatty Change(コーパス側ラベル "Degeneration, fatty")はGT
 # スライドが0枚のため定量評価はできないが、experiments/0031 の目視診断で
 # macenko側が視覚的に妥当な一致を示した。
+#
+# 【2026-09-18 修正】完全版GTでの3択直接比較(上記 WHITEN_FINDINGS 参照)で
+# Inclusion body はwhitenへ移動。Hypertrophyは完全版GT(53枚)でも
+# baseline=1・macenko=2と僅差でbaselineがわずかに優位だが、差が小さく
+# (GT数増加による基準率上昇の影響が大きいと見られる)、かつこの所見自体が
+# ランダム対照で不成立(README「所見の3クラス分け」)と確定済みで実害が
+# 無いため、ルーティングは変更せず macenko のまま維持する。
+#
+# 【2026-09-18 修正2】Fatty Change(コーパス側ラベル "Degeneration, fatty")も
+# 完全版GTでコーパスに3枚のGTスライドが見つかり、CATEGORIES へ追加して初めて
+# 定量的な3択比較ができた(experiments/0029〜0031・0034 再検証)。結果は
+# best_rank: baseline=17, macenko=28, whiten=3 と**whitenが圧倒的に最良で、
+# 現行のmacenkoルーティングは3択中最悪**だった。experiments/0031/0034の目視で
+# macenko側が視覚的に妥当に見えたのは事実だが、定量的にはwhitenの方が優れる。
+# WHITEN_FINDINGSへ移した。
 MACENKO_FINDINGS = frozenset({
     "Hypertrophy",
     "Increased mitosis",
-    "Inclusion body, intracytoplasmic",
-    "Degeneration, fatty",
 })
 
 

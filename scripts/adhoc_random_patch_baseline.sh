@@ -47,17 +47,20 @@ PROJECT_ROOT="/workspace/filesrv02/kito/patch-vector-search"
 # =====================================================
 
 TARGETS=(
-    # experiments/0019 (背景除去済み 0018 corpus) の deliver 集合に対する対照。
-    # 0015(0002)の対照(glycogen job 9943 = 判定91%)との比較で、背景を抜いた
-    # コーパスでも curated 集合が「一般的な肝パッチ」と区別できるかを見る。
-    # 5番目のフィールド = --corpus-dir: 対照も 0018 の母集団から引く。
-    # exclude は deliver モードなので GT スライド全体。
-    #
-    # granular eosinophilic は 0019 で非 seed 候補が5枚しか無く盲検シートに
-    # 乗らない(job 10497)ので対照は取らない。
-    "ground_glass_0019|outputs/0019_20260909_build_finding_patch_set_deblank/ground_glass_appearance__deliver/ground_glass_appearance__deliver|28113,28140,37688,6371||outputs/0018_20260909_build_faiss_index_deblank/default"
-    "glycogen_0019|outputs/0019_20260909_build_finding_patch_set_deblank/deposit_glycogen__deliver/deposit_glycogen__deliver|49244,49372,52799,53036,53267,58070||outputs/0018_20260909_build_faiss_index_deblank/default"
+    # experiments/0058 の deliver 集合(baseline=0018固定、finding_routing.py の
+    # MACENKO_FINDINGS/WHITEN_FINDINGSどちらにも非該当)に対する対照。
+    # exclude は deliver モードなので GT スライド全体(job 10988 の
+    # corpus_gt_slides をそのまま指定)。
+    "microgranuloma_0058|outputs/0058_20260918_build_finding_patch_set_deblank_sparse_findings/microgranuloma__deliver/microgranuloma__deliver|15438,24615,3464,42770,43084,43151,43158,43203,43804,43872,44174,44793,44861,44967,48062,48063||outputs/0018_20260909_build_faiss_index_deblank/default"
+    "cellular_infiltration_0058|outputs/0058_20260918_build_finding_patch_set_deblank_sparse_findings/cellular_infiltration__deliver/cellular_infiltration__deliver|27861,29457,30011,30023,30025,30079,4776||outputs/0018_20260909_build_faiss_index_deblank/default"
+    "swelling_0058|outputs/0058_20260918_build_finding_patch_set_deblank_sparse_findings/swelling__deliver/swelling__deliver|30721,32021,52331,52386,61469,61492,61518||outputs/0018_20260909_build_faiss_index_deblank/default"
 )
+
+# 過去に実行済みの対照(参考。再実行する場合は上のTARGETSに戻すこと):
+#   ground_glass_0019 (job 10498) — 判定20/100だがラベル取り違えと判明、実効分離能約80%
+#     "ground_glass_0019|outputs/0019_20260909_build_finding_patch_set_deblank/ground_glass_appearance__deliver/ground_glass_appearance__deliver|28113,28140,37688,6371||outputs/0018_20260909_build_faiss_index_deblank/default"
+#   glycogen_0019 (job 10498) — 判定精度84%
+#     "glycogen_0019|outputs/0019_20260909_build_finding_patch_set_deblank/deposit_glycogen__deliver/deposit_glycogen__deliver|49244,49372,52799,53036,53267,58070||outputs/0018_20260909_build_faiss_index_deblank/default"
 
 RUN_CMDS=""
 for target in "${TARGETS[@]}"; do

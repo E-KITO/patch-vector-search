@@ -1,0 +1,51 @@
+# ============================================================
+# experiments/0063: 0051 を完全版GT(full_finding_liver.csv)で再実行するA/B
+# ============================================================
+# 2026-09-18: single_finding_liver.csv がプロジェクト全体の唯一のGTソース
+# だったと判明(README「GTソースの根本的な過小カウントが判明」)。0051は
+# macenko_patchfit vs macenko_slidefitの索引選定という上流の意思決定であり、
+# 0054・0055などmacenko空間を前提とする後続実験より先に完全GTで再検証する
+# 必要がある。gt_csv だけを full_finding_liver.csv に差し替え、他は0051と
+# 完全に同一。なお完全版GTでは validate_against_ground_truth.CATEGORIES に
+# Fatty Change が追加され7→8所見になっているため、gt_comparison.csv・
+# assert len(gt_df)==len(CATEGORIES) はいずれも8行/8所見を期待する。
+# ============================================================
+# 以下は0051オリジナルのコメント(狙い、変更なし):
+# ============================================================
+# experiments/0051: Macenko染色ベクトル推定「パッチ単位fit(既存,
+# experiments/0033)」vs「スライド単位fit(新規, experiments/0050)」の
+# 実検索性能比較 — この変更の最終判定
+# ============================================================
+# experiments/0043・0044の事前検証(染色ベクトル安定性、torchstain+
+# lib.raw_patchのみの小規模実験)を受けて、wsi_preprocess側にスライド単位fit
+# への全コーパス再構築を依頼した(README「wsi_preprocess連携」)。本実験は
+# その効果を実際のGT best_rankで検証する。
+#
+# 比較はscripts/validate_against_ground_truth.run_comparisonの枠組みをそのまま
+# 使い、GT対応7所見全部について(現状macenkoにルーティングされているのは
+# Hypertrophy/Increased mitosis/Inclusion bodyの3所見のみだが、スライド単位
+# fitで他の所見もmacenko空間が競争力を持つようになる可能性があるため、
+# ルーティング先を絞らず7所見全部で評価する)、次の2索引を比較する:
+#   - macenko_patchfit: 既存Macenko索引(experiments/0033、lib.finding_routing
+#     が本番で使っているものと同一)
+#   - macenko_slidefit: 新規Macenko索引(experiments/0050、スライド単位fit
+#     コーパスから構築)
+# クエリ側の埋め込み(atlas図版の埋め込み方法)は両アームで完全に同一
+# (lib.finding_routing.MACENKO_STAIN_REFERENCEへのtorchstain正規化、
+# experiments/0045と同じ_macenko_tile_embed) — 変わるのはコーパス側の
+# 染色ベクトル推定方法だけになるよう統制している。
+#
+# 判定基準: found(GTスライドが候補プールに残るか)を最優先で見て、その上で
+# best_rankがslidefitで悪化していないかを確認する(README「experiments/0037」
+# 「0045」の教訓——found/best_rankが逆方向を指すことがあるため両方見る)。
+#
+# 前提: experiments/0049(manifest)・0050(索引)が先に完了していること。
+# ============================================================
+
+seed: 42
+tile_size: 224
+
+gt_csv: "data/processed_csv/full_finding_liver.csv"
+
+macenko_slidefit_index_dir: "outputs/0050_20260916_build_faiss_index_macenko_slidefit/default"
+macenko_slidefit_features_dir: "data/trident_processed_uni_v1_macenko_slidefit/20x_224px_0px_overlap/features_uni_v1_macenko_slidefit"

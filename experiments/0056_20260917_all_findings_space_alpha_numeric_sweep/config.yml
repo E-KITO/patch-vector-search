@@ -1,0 +1,41 @@
+# ============================================================
+# experiments/0056(フェーズA): 全25所見×3空間(plain/whiten/macenko)×
+# 局所k近傍補正alphaグリッドの軽量数値スイープ(画像生成なし)
+# ============================================================
+# 背景(ユーザー提案): experiments/0055でGT対応7所見について「現行の空間
+# ルーティング+局所補正」と「他の空間+局所補正」を比較したところ、7所見中
+# 2所見(Deposit, glycogen / Proliferation, Kupffer cell)で現行ルーティングが
+# 最適でなくなっていた(空間選択とalpha補正は本来同時に探索すべき変数だった)。
+# GT対応7所見にとどまらず、NNLアトラス全25所見についても同じ「空間×alpha」の
+# 組み合わせを見たい、ただし判断材料はGTが無いため見た目(目視)にせざるを
+# 得ない、という依頼を受けた。
+#
+# 25所見×3空間×13alpha=975通りを、目視前の一次フィルタとして軽量な数値
+# 指標(画像生成なし、`PatchIndex.search_top_slides_multi`のFAISS IVF検索の
+# みで済ませ、生WSIクロップ・matplotlib描画を伴う実ギャラリー生成は行わない)
+# でスクリーニングする。ここで「現行の既定(plainのみ、GT根拠のある7所見は
+# 既存ルーティング)から明確に変わりそうな組み合わせ」の当たりをつけ、
+# 実際に画像を目視するフェーズB(別実験)は、この結果を見て絞り込んだ候補
+# だけに限定する。
+#
+# atlasプール・corpusプール・局所補正のロジックはexperiments/0055と同一
+# (自己一致除外・k近傍平均差)。
+#
+# 出力(outputs/0056_.../default/):
+#   all_findings_space_alpha_sweep.csv   975行(所見×空間×alpha)の数値指標
+# ============================================================
+
+seed: 42
+
+atlas_root: "data/query/Nonneoplastic-Lesion-Atlas-National-Toxicology-Program_Liver"
+atlas_figures_csv: "data/query/nnl_liver_atlas_figures.csv"
+
+tile_size: 224
+k_neighbors: 50
+n_corpus_pool: 30000
+
+alphas: [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.75, 1.0]
+
+nprobe: 32
+k_candidates: 8000
+top_n_slides: 10

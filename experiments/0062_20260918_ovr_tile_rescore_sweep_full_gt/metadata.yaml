@@ -1,0 +1,7 @@
+exp_id: 0062
+exp_name: 0062_20260918_ovr_tile_rescore_sweep_full_gt
+created_date: 20260918
+git_commit: ad3301a7615bba98f167e766e09d6126fac1f830
+resumed_from_exp: 0036_20260912_ovr_tile_rescore_sweep
+resume_checkpoint_dir: outputs/0036_20260912_ovr_tile_rescore_sweep
+resume_checkpoint_file: null
